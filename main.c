@@ -2,36 +2,149 @@
 #include "DSP2833x_Examples.h"
 #include <math.h>
 
-#define MOTOR_POLE_PAIRS      4
+// ---------------------------------------------------------
+// RESOLVER HARDWARE PIN MAPPINGS (Confirmed from Schematic)
+// ---------------------------------------------------------
+
+// RDC FAULT PINS (Port C Inputs)
+#define READ_RDC_DOS()    (GpioDataRegs.GPCDAT.bit.GPIO84)
+#define READ_RDC_LOT()    (GpioDataRegs.GPCDAT.bit.GPIO85)
+
+#define RDC_CS_LOW()      (GpioDataRegs.GPACLEAR.bit.GPIO19 = 1)
+#define RDC_CS_HIGH()     (GpioDataRegs.GPASET.bit.GPIO19 = 1)
+#define RDC_A0_LOW()      (GpioDataRegs.GPACLEAR.bit.GPIO20 = 1)
+#define RDC_A0_HIGH()     (GpioDataRegs.GPASET.bit.GPIO20 = 1)
+#define RDC_A1_LOW()      (GpioDataRegs.GPACLEAR.bit.GPIO21 = 1)
+#define RDC_A1_HIGH()     (GpioDataRegs.GPASET.bit.GPIO21 = 1)
+#define RDC_SAMPLE_LOW()  (GpioDataRegs.GPACLEAR.bit.GPIO23 = 1)
+#define RDC_SAMPLE_HIGH() (GpioDataRegs.GPASET.bit.GPIO23 = 1)
+
+// ---------------------------------------------------------
+// GATE DRIVER HARDWARE PIN MAPPINGS
+// ---------------------------------------------------------
+// SPI-B Chip Select (GPIO27 - Port A)
+#define DRV_CS_LOW()      (GpioDataRegs.GPACLEAR.bit.GPIO27 = 1)
+#define DRV_CS_HIGH()     (GpioDataRegs.GPASET.bit.GPIO27 = 1)
+
+// DRV8323 Calibration Pin (GPIO38 - Port B)
+#define DRV_CAL_LOW()     (GpioDataRegs.GPBCLEAR.bit.GPIO38 = 1)
+#define DRV_CAL_HIGH()    (GpioDataRegs.GPBSET.bit.GPIO38 = 1)
+
+// DRV8323 Enable Pin (GPIO39 - Port B)
+#define DRV_ENABLE_LOW()  (GpioDataRegs.GPBCLEAR.bit.GPIO39 = 1)
+#define DRV_ENABLE_HIGH() (GpioDataRegs.GPBSET.bit.GPIO39 = 1)
+
+// ---------------------------------------------------------
+// MATH & MOTOR CONSTANTS
+// ---------------------------------------------------------
+#define MOTOR_POLE_PAIRS      4  // Placeholder: Ask HW team
 #define ONE_DIVIDED_BY_SQRT3  0.57735026919f
 #define CURRENT_GAIN          0.015f
 #define RAD_PER_TICK          0.00009587379f
 
-// FOC Structures
-typedef struct { float As, Bs, Cs, Alpha, Beta; } CLARKE_T;
-typedef struct { float Alpha, Beta, Sine, Cosine, Ds, Qs; } PARK_T;
-typedef struct { float Ds, Qs, Sine, Cosine, Alpha, Beta; } IPARK_T;
+// =========================================================
+// FIELD ORIENTED CONTROL (FOC) STRUCTURES
+// =========================================================
+typedef struct {
+    float As;
+    float Bs;
+    float Cs;
+    float Alpha;
+    float Beta;
+} CLARKE_T;
 
+typedef struct {
+    float Alpha;
+    float Beta;
+    float Sine;
+    float Cosine;
+    float Ds;
+    float Qs;
+} PARK_T;
+
+typedef struct {
+    float Ds;
+    float Qs;
+    float Sine;
+    float Cosine;
+    float Alpha;
+    float Beta;
+} IPARK_T;
+
+typedef struct {
+    float Alpha;
+    float Beta;
+    float Va;
+    float Vb;
+    float Vc;
+} INV_CLARKE_T;
+
+typedef struct {
+    float Ref;
+    float Fbk;
+    float Err;
+    float Kp;
+    float Ki;
+    float Umax;
+    float Umin;
+    float Ui;
+    float Out;
+} PI_CONTROLLER_T;
+
+// =========================================================
+// FUNCTION PROTOTYPES
+// =========================================================
 void Init_ADC_CurrentSensors(void);
 void Init_SPI_RDC(void);
 void Init_SPI_GateDriver(void);
 void Init_ePWM_MotorControl(void);
+void Init_PI_Controllers(void);
+void Calc_InvClarke(INV_CLARKE_T *v);
+void AD2S1210_SetResolution_12Bit(void);
+void Read_Resolver_Data(void);
+Uint16 SPI_ReadWrite_16(Uint16 tx_data);
+void DRV8323_WakeUp(void);
+void DRV8323_WriteRegister(Uint16 address, Uint16 data);
+Uint16 DRV8323_ReadRegister(Uint16 address);
+void DRV8323_Init_GateDriveStrength(void);
+void DRV8323_Init_OCP(void);
+Uint16 SPI_B_ReadWrite_16(Uint16 tx_data);
 void Calc_Clarke(CLARKE_T *v);
 void Calc_Park(PARK_T *v);
+void Calc_InvPark(IPARK_T *v);
+void Calc_PI(PI_CONTROLLER_T *v);
 __interrupt void adc_isr(void);
 
+// =========================================================
+// GLOBAL VARIABLES
+// =========================================================
 Uint16 Raw_Current_A = 0;
 Uint16 Raw_Current_B = 0;
 Uint16 Raw_Current_C = 0;
 float Offset_Current_A = 2048.0f;
 float Offset_Current_B = 2048.0f;
 float Offset_Current_C = 2048.0f;
+
 Uint16 Rotor_Angle_Raw = 0;
 Uint16 Rotor_Angle_Elec = 0;
+int16  Rotor_Velocity_Raw = 0;
+Uint16 RDC_Fault_Flag = 0;
+
+Uint16 GD_Test_Readback = 0;
+Uint16 GD_Fault_Status = 0;
+
+Uint16 System_State = 0; // 0 = IDLE (Safe), 1 = RUN (Active)
 
 CLARKE_T clarke_calc;
 PARK_T park_calc;
+IPARK_T ipark_calc;
+INV_CLARKE_T inv_clarke_calc;
+PI_CONTROLLER_T pi_id;
+PI_CONTROLLER_T pi_iq;
 
+// =========================================================
+// MAIN PROGRAM
+// =========================================================
 void main(void)
 {
     DisableDog();
@@ -51,7 +164,17 @@ void main(void)
     InitAdc();
     Init_ADC_CurrentSensors();
     Init_SPI_RDC();
+    AD2S1210_SetResolution_12Bit();
+
     Init_SPI_GateDriver();
+    DRV8323_WakeUp();
+    DRV8323_Init_GateDriveStrength();
+    DRV8323_Init_OCP();
+
+    GD_Test_Readback = DRV8323_ReadRegister(0x03);
+    GD_Fault_Status = DRV8323_ReadRegister(0x00);
+
+    Init_PI_Controllers();
     Init_ePWM_MotorControl();
 
     PieCtrlRegs.PIEIER1.bit.INTx6 = 1;
@@ -59,39 +182,402 @@ void main(void)
     EINT;
     ERTM;
 
-    while(1) {}
+    while(1)
+    {
+        if (READ_RDC_DOS() == 0 || READ_RDC_LOT() == 0)
+        {
+            RDC_Fault_Flag = 1;
+            System_State = 0; // Drop to Idle/Safe state
+
+            // TODO (Milestone 10):
+            // 1. Force ePWMs to 0% duty cycle via Trip Zone
+            // 2. Pull Gate Driver ENABLE pin low
+        }
+        else
+        {
+            RDC_Fault_Flag = 0;
+        }
+    }
 }
 
+// =========================================================
+// INTERRUPT SERVICE ROUTINES (Runs at 20 kHz)
+// =========================================================
 __interrupt void adc_isr(void)
 {
+    // --- 1. SENSOR FEEDBACK ---
     Raw_Current_A = (AdcRegs.ADCRESULT0 >> 4);
     Raw_Current_B = (AdcRegs.ADCRESULT1 >> 4);
     Raw_Current_C = (AdcRegs.ADCRESULT2 >> 4);
 
     clarke_calc.As = ((float)Raw_Current_A - Offset_Current_A) * CURRENT_GAIN;
     clarke_calc.Bs = ((float)Raw_Current_B - Offset_Current_B) * CURRENT_GAIN;
+    clarke_calc.Cs = ((float)Raw_Current_C - Offset_Current_C) * CURRENT_GAIN;
 
-    // Basic Resolver Read (Placeholder)
+    Read_Resolver_Data();
     Rotor_Angle_Elec = Rotor_Angle_Raw * MOTOR_POLE_PAIRS;
-    float angle_rad = (float)Rotor_Angle_Elec * RAD_PER_TICK;
 
+    float angle_rad = (float)Rotor_Angle_Elec * RAD_PER_TICK;
     park_calc.Sine   = sinf(angle_rad);
     park_calc.Cosine = cosf(angle_rad);
 
+    // --- 2. FORWARD TRANSFORMS (AC to DC) ---
     Calc_Clarke(&clarke_calc);
 
     park_calc.Alpha = clarke_calc.Alpha;
     park_calc.Beta  = clarke_calc.Beta;
     Calc_Park(&park_calc);
 
+    // --- 3. PI CURRENT CONTROLLERS ---
+    pi_id.Fbk = park_calc.Ds;
+    pi_iq.Fbk = park_calc.Qs;
+
+    if (System_State == 1) // RUN MODE
+    {
+        Calc_PI(&pi_id);
+        Calc_PI(&pi_iq);
+
+        ipark_calc.Ds = pi_id.Out;
+        ipark_calc.Qs = pi_iq.Out;
+    }
+    else // IDLE MODE (Safe State)
+    {
+        ipark_calc.Ds = 0.0f;
+        ipark_calc.Qs = 0.0f;
+        pi_id.Ui = 0.0f;
+        pi_iq.Ui = 0.0f;
+    }
+
+    // --- 4. REVERSE TRANSFORMS (DC to AC) ---
+    ipark_calc.Sine = park_calc.Sine;
+    ipark_calc.Cosine = park_calc.Cosine;
+    Calc_InvPark(&ipark_calc);
+
+    inv_clarke_calc.Alpha = ipark_calc.Alpha;
+    inv_clarke_calc.Beta  = ipark_calc.Beta;
+    Calc_InvClarke(&inv_clarke_calc);
+
+    // --- 5. DUTY CYCLE GENERATION ---
+    EPwm1Regs.CMPA.half.CMPA = (Uint16)(1875.0f + (inv_clarke_calc.Va * 1875.0f));
+    EPwm2Regs.CMPA.half.CMPA = (Uint16)(1875.0f + (inv_clarke_calc.Vb * 1875.0f));
+    EPwm3Regs.CMPA.half.CMPA = (Uint16)(1875.0f + (inv_clarke_calc.Vc * 1875.0f));
+
+    // --- 6. CLEAR INTERRUPT FLAGS ---
     AdcRegs.ADCST.bit.INT_SEQ1_CLR = 1;
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
 }
 
-// Implementations omitted for historical brevity
-void Init_ADC_CurrentSensors(void) {}
-void Init_SPI_RDC(void) {}
-void Init_SPI_GateDriver(void) {}
-void Init_ePWM_MotorControl(void) {}
-void Calc_Clarke(CLARKE_T *v) {}
-void Calc_Park(PARK_T *v) {}
+// =========================================================
+// HARDWARE INITIALIZATION FUNCTIONS
+// =========================================================
+void Init_ADC_CurrentSensors(void)
+{
+    EALLOW;
+    AdcRegs.ADCTRL1.bit.ACQ_PS = 0x0F;
+    AdcRegs.ADCTRL1.bit.SEQ_CASC = 1;
+    AdcRegs.ADCTRL3.bit.ADCCLKPS = 0x03;
+    AdcRegs.ADCTRL3.bit.SMODE_SEL = 0;
+    AdcRegs.ADCMAXCONV.bit.MAX_CONV1 = 2;
+    AdcRegs.ADCCHSELSEQ1.bit.CONV00 = 0x0;
+    AdcRegs.ADCCHSELSEQ1.bit.CONV01 = 0x8;
+    AdcRegs.ADCCHSELSEQ1.bit.CONV02 = 0xA;
+    AdcRegs.ADCTRL2.bit.EPWM_SOCA_SEQ1 = 1;
+    AdcRegs.ADCTRL2.bit.INT_ENA_SEQ1 = 1;
+    EDIS;
+}
+
+void Init_PI_Controllers(void)
+{
+    pi_id.Ref = 0.0f;
+    pi_id.Fbk = 0.0f;
+    pi_id.Err = 0.0f;
+    pi_id.Ui  = 0.0f;
+    pi_id.Kp  = 0.5f;
+    pi_id.Ki  = 0.01f;
+    pi_id.Umax = 1.0f;
+    pi_id.Umin = -1.0f;
+
+    pi_iq.Ref = 0.0f;
+    pi_iq.Fbk = 0.0f;
+    pi_iq.Err = 0.0f;
+    pi_iq.Ui  = 0.0f;
+    pi_iq.Kp  = 0.5f;
+    pi_iq.Ki  = 0.01f;
+    pi_iq.Umax = 1.0f;
+    pi_iq.Umin = -1.0f;
+}
+
+void Init_ePWM_MotorControl(void)
+{
+    EALLOW;
+    GpioCtrlRegs.GPAPUD.all &= ~0x0000003F;
+    GpioCtrlRegs.GPAMUX1.bit.GPIO0 = 1;
+    GpioCtrlRegs.GPAMUX1.bit.GPIO1 = 1;
+    GpioCtrlRegs.GPAMUX1.bit.GPIO2 = 1;
+    GpioCtrlRegs.GPAMUX1.bit.GPIO3 = 1;
+    GpioCtrlRegs.GPAMUX1.bit.GPIO4 = 1;
+    GpioCtrlRegs.GPAMUX1.bit.GPIO5 = 1;
+
+    SysCtrlRegs.PCLKCR0.bit.TBCLKSYNC = 0;
+
+    // Master ePWM 1
+    EPwm1Regs.TBPRD = 3750;
+    EPwm1Regs.TBPHS.half.TBPHS = 0;
+    EPwm1Regs.TBCTL.bit.CTRMODE = 2;
+    EPwm1Regs.TBCTL.bit.PHSEN = 0;
+    EPwm1Regs.TBCTL.bit.SYNCOSEL = 1;
+    EPwm1Regs.CMPA.half.CMPA = 1875;
+    EPwm1Regs.CMPCTL.bit.SHDWAMODE = 0;
+    EPwm1Regs.CMPCTL.bit.LOADAMODE = 0;
+    EPwm1Regs.AQCTLA.bit.CAU = 2;
+    EPwm1Regs.AQCTLA.bit.CAD = 1;
+    EPwm1Regs.DBCTL.bit.OUT_MODE = 3;
+    EPwm1Regs.DBCTL.bit.POLSEL = 2;
+    EPwm1Regs.DBRED = 150;
+    EPwm1Regs.DBFED = 150;
+    EPwm1Regs.TZCTL.bit.TZA = 2;
+    EPwm1Regs.TZCTL.bit.TZB = 2;
+    EPwm1Regs.ETSEL.bit.SOCAEN = 1;
+    EPwm1Regs.ETSEL.bit.SOCASEL = 1;
+    EPwm1Regs.ETPS.bit.SOCAPRD = 1;
+
+    // Slave ePWM 2
+    EPwm2Regs.TBPRD = 3750;
+    EPwm2Regs.TBPHS.half.TBPHS = 0;
+    EPwm2Regs.TBCTL.bit.CTRMODE = 2;
+    EPwm2Regs.TBCTL.bit.PHSEN = 1;
+    EPwm2Regs.TBCTL.bit.SYNCOSEL = 0;
+    EPwm2Regs.CMPA.half.CMPA = 1875;
+    EPwm2Regs.CMPCTL.bit.SHDWAMODE = 0;
+    EPwm2Regs.CMPCTL.bit.LOADAMODE = 0;
+    EPwm2Regs.AQCTLA.bit.CAU = 2;
+    EPwm2Regs.AQCTLA.bit.CAD = 1;
+    EPwm2Regs.DBCTL.bit.OUT_MODE = 3;
+    EPwm2Regs.DBCTL.bit.POLSEL = 2;
+    EPwm2Regs.DBRED = 150;
+    EPwm2Regs.DBFED = 150;
+    EPwm2Regs.TZCTL.bit.TZA = 2;
+    EPwm2Regs.TZCTL.bit.TZB = 2;
+
+    // Slave ePWM 3
+    EPwm3Regs.TBPRD = 3750;
+    EPwm3Regs.TBPHS.half.TBPHS = 0;
+    EPwm3Regs.TBCTL.bit.CTRMODE = 2;
+    EPwm3Regs.TBCTL.bit.PHSEN = 1;
+    EPwm3Regs.CMPA.half.CMPA = 1875;
+    EPwm3Regs.CMPCTL.bit.SHDWAMODE = 0;
+    EPwm3Regs.CMPCTL.bit.LOADAMODE = 0;
+    EPwm3Regs.AQCTLA.bit.CAU = 2;
+    EPwm3Regs.AQCTLA.bit.CAD = 1;
+    EPwm3Regs.DBCTL.bit.OUT_MODE = 3;
+    EPwm3Regs.DBCTL.bit.POLSEL = 2;
+    EPwm3Regs.DBRED = 150;
+    EPwm3Regs.DBFED = 150;
+    EPwm3Regs.TZCTL.bit.TZA = 2;
+    EPwm3Regs.TZCTL.bit.TZB = 2;
+
+    SysCtrlRegs.PCLKCR0.bit.TBCLKSYNC = 1;
+    EDIS;
+}
+
+void Init_SPI_GateDriver(void)
+{
+    EALLOW;
+    GpioCtrlRegs.GPAPUD.all &= ~0x07000000;
+    GpioCtrlRegs.GPAQSEL2.bit.GPIO24 = 3;
+    GpioCtrlRegs.GPAQSEL2.bit.GPIO25 = 3;
+    GpioCtrlRegs.GPAQSEL2.bit.GPIO26 = 3;
+    GpioCtrlRegs.GPAMUX2.bit.GPIO24 = 3;
+    GpioCtrlRegs.GPAMUX2.bit.GPIO25 = 3;
+    GpioCtrlRegs.GPAMUX2.bit.GPIO26 = 3;
+    GpioCtrlRegs.GPAMUX2.bit.GPIO27 = 0;
+    GpioCtrlRegs.GPBMUX1.bit.GPIO38 = 0;
+    GpioCtrlRegs.GPBMUX1.bit.GPIO39 = 0;
+    GpioCtrlRegs.GPADIR.bit.GPIO27 = 1;
+    GpioCtrlRegs.GPBDIR.bit.GPIO38 = 1;
+    GpioCtrlRegs.GPBDIR.bit.GPIO39 = 1;
+    EDIS;
+
+    DRV_CS_HIGH();
+    DRV_CAL_LOW();
+    DRV_ENABLE_LOW();
+
+    McbspbRegs.SPCR2.all = 0x0000;
+    McbspbRegs.SPCR1.all = 0x0000;
+    McbspbRegs.SPCR1.bit.CLKSTP = 3;
+    McbspbRegs.PCR.all = 0x0F08;
+    McbspbRegs.PCR.bit.CLKXP = 0;
+    McbspbRegs.PCR.bit.CLKRP = 0;
+    McbspbRegs.RCR1.bit.RWDLEN1 = 2;
+    McbspbRegs.XCR1.bit.XWDLEN1 = 2;
+    McbspbRegs.SRGR2.bit.CLKSM = 1;
+    McbspbRegs.SRGR1.bit.CLKGDV = 36;
+    McbspbRegs.SPCR2.bit.GRST = 1;
+    DELAY_US(10);
+    McbspbRegs.SPCR2.bit.XRST = 1;
+    McbspbRegs.SPCR1.bit.RRST = 1;
+    McbspbRegs.SPCR2.bit.FRST = 1;
+}
+
+void Init_SPI_RDC(void)
+{
+    EALLOW;
+    GpioCtrlRegs.GPAPUD.all &= ~0x00070000;
+    GpioCtrlRegs.GPAQSEL2.bit.GPIO16 = 3;
+    GpioCtrlRegs.GPAQSEL2.bit.GPIO17 = 3;
+    GpioCtrlRegs.GPAQSEL2.bit.GPIO18 = 3;
+
+    GpioCtrlRegs.GPCMUX2.bit.GPIO84 = 0;
+    GpioCtrlRegs.GPCMUX2.bit.GPIO85 = 0;
+    GpioCtrlRegs.GPCDIR.bit.GPIO84 = 0;
+    GpioCtrlRegs.GPCDIR.bit.GPIO85 = 0;
+    GpioCtrlRegs.GPCPUD.bit.GPIO84 = 0;
+    GpioCtrlRegs.GPCPUD.bit.GPIO85 = 0;
+
+    GpioCtrlRegs.GPAMUX2.bit.GPIO16 = 1;
+    GpioCtrlRegs.GPAMUX2.bit.GPIO17 = 1;
+    GpioCtrlRegs.GPAMUX2.bit.GPIO18 = 1;
+
+    GpioCtrlRegs.GPAMUX2.bit.GPIO19 = 0;
+    GpioCtrlRegs.GPAMUX2.bit.GPIO20 = 0;
+    GpioCtrlRegs.GPAMUX2.bit.GPIO21 = 0;
+    GpioCtrlRegs.GPAMUX2.bit.GPIO23 = 0;
+
+    GpioCtrlRegs.GPADIR.bit.GPIO19 = 1;
+    GpioCtrlRegs.GPADIR.bit.GPIO20 = 1;
+    GpioCtrlRegs.GPADIR.bit.GPIO21 = 1;
+    GpioCtrlRegs.GPADIR.bit.GPIO23 = 1;
+    EDIS;
+
+    RDC_CS_HIGH();
+    RDC_SAMPLE_HIGH();
+    RDC_A0_LOW();
+    RDC_A1_LOW();
+
+    SpiaRegs.SPICCR.bit.SPISWRESET = 0;
+    SpiaRegs.SPICCR.all = 0x000F;
+    SpiaRegs.SPICTL.all = 0x0006;
+    SpiaRegs.SPIBRR = 4;
+    SpiaRegs.SPICCR.bit.SPISWRESET = 1;
+
+    SpiaRegs.SPIFFTX.all = 0xE040;
+    SpiaRegs.SPIFFRX.all = 0x2044;
+    SpiaRegs.SPIFFCT.all = 0x0;
+}
+
+Uint16 SPI_ReadWrite_16(Uint16 tx_data)
+{
+    while(SpiaRegs.SPIFFTX.bit.TXFFST != 0) { }
+    RDC_CS_LOW();
+    SpiaRegs.SPITXBUF = tx_data;
+    while(SpiaRegs.SPIFFRX.bit.RXFFST == 0) { }
+    Uint16 rx_data = SpiaRegs.SPIRXBUF;
+    RDC_CS_HIGH();
+    return rx_data;
+}
+
+Uint16 SPI_B_ReadWrite_16(Uint16 tx_data)
+{
+    while(McbspbRegs.SPCR2.bit.XRDY == 0) { }
+    DRV_CS_LOW();
+    McbspbRegs.DXR1.all = tx_data;
+    while(McbspbRegs.SPCR1.bit.RRDY == 0) { }
+    Uint16 rx_data = McbspbRegs.DRR1.all;
+    DRV_CS_HIGH();
+    return rx_data;
+}
+
+void AD2S1210_SetResolution_12Bit(void)
+{
+    RDC_A0_HIGH();
+    RDC_A1_HIGH();
+    DELAY_US(10);
+    SPI_ReadWrite_16(0x9277);
+    DELAY_US(10);
+    RDC_A0_LOW();
+    RDC_A1_LOW();
+    DELAY_US(100);
+}
+
+void Read_Resolver_Data(void)
+{
+    RDC_SAMPLE_LOW();
+    DELAY_US(1);
+    RDC_A0_LOW();
+    RDC_A1_LOW();
+    Rotor_Angle_Raw = SPI_ReadWrite_16(0x0000);
+    RDC_A0_LOW();
+    RDC_A1_HIGH();
+    Rotor_Velocity_Raw = (int16)SPI_ReadWrite_16(0x0000);
+    RDC_SAMPLE_HIGH();
+}
+
+void DRV8323_WakeUp(void)
+{
+    DRV_ENABLE_HIGH();
+    DELAY_US(2000);
+}
+
+void DRV8323_WriteRegister(Uint16 address, Uint16 data)
+{
+    Uint16 payload = (address << 11) | (data & 0x07FF);
+    SPI_B_ReadWrite_16(payload);
+}
+
+Uint16 DRV8323_ReadRegister(Uint16 address)
+{
+    Uint16 tx_payload = 0x8000 | (address << 11);
+    Uint16 rx_payload = SPI_B_ReadWrite_16(tx_payload);
+    return (rx_payload & 0x07FF);
+}
+
+void DRV8323_Init_GateDriveStrength(void)
+{
+    DRV8323_WriteRegister(0x02, 0x0344);
+    DRV8323_WriteRegister(0x03, 0x0344);
+}
+
+void DRV8323_Init_OCP(void)
+{
+    DRV8323_WriteRegister(0x05, 0x0159);
+}
+
+void Calc_Clarke(CLARKE_T *v)
+{
+    v->Alpha = v->As;
+    v->Beta = (v->As + 2.0f * v->Bs) * ONE_DIVIDED_BY_SQRT3;
+}
+
+void Calc_Park(PARK_T *v)
+{
+    v->Ds = (v->Alpha * v->Cosine) + (v->Beta * v->Sine);
+    v->Qs = (v->Beta * v->Cosine) - (v->Alpha * v->Sine);
+}
+
+void Calc_InvPark(IPARK_T *v)
+{
+    v->Alpha = (v->Ds * v->Cosine) - (v->Qs * v->Sine);
+    v->Beta  = (v->Qs * v->Cosine) + (v->Ds * v->Sine);
+}
+
+void Calc_InvClarke(INV_CLARKE_T *v)
+{
+    v->Va = v->Alpha;
+    v->Vb = -0.5f * v->Alpha + 0.8660254f * v->Beta;
+    v->Vc = -0.5f * v->Alpha - 0.8660254f * v->Beta;
+}
+
+void Calc_PI(PI_CONTROLLER_T *v)
+{
+    v->Err = v->Ref - v->Fbk;
+    float Up = v->Kp * v->Err;
+    v->Ui = v->Ui + (v->Ki * v->Err);
+
+    if (v->Ui > v->Umax) { v->Ui = v->Umax; }
+    else if (v->Ui < v->Umin) { v->Ui = v->Umin; }
+
+    v->Out = Up + v->Ui;
+
+    if (v->Out > v->Umax) { v->Out = v->Umax; }
+    else if (v->Out < v->Umin) { v->Out = v->Umin; }
+}
