@@ -1,0 +1,15 @@
+# TI Code Composer Studio (CCS) Build Artifacts
+Debug/
+Release/
+*.out
+*.map
+*.obj
+*.d
+*.asm
+*.hex
+*.bin
+
+# CCS Workspace metadata 
+.launches/
+.settings/
+*.cmd.bak
