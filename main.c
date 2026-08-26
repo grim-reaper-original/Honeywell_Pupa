@@ -133,7 +133,6 @@ Uint16 RDC_Fault_Flag = 0;
 Uint16 GD_Test_Readback = 0;
 Uint16 GD_Fault_Status = 0;
 
-Uint16 System_State = 0; // 0 = IDLE (Safe), 1 = RUN (Active)
 
 CLARKE_T clarke_calc;
 PARK_T park_calc;
@@ -141,6 +140,18 @@ IPARK_T ipark_calc;
 INV_CLARKE_T inv_clarke_calc;
 PI_CONTROLLER_T pi_id;
 PI_CONTROLLER_T pi_iq;
+
+// STATE MACHINE VARIABLES ---
+Uint16 System_State = 0;      // 0 = IDLE, 1 = ALIGN, 2 = RUN
+Uint32 State_Timer = 0;       // Counts ISR ticks (50us each)
+Uint16 Resolver_Offset = 0;   // The mechanical zero-degree offset
+
+// --- SPEED CONTROLLER ---
+PI_CONTROLLER_T pi_speed;     // Outer Speed Loop
+PI_CONTROLLER_T pi_id;        // Inner Flux Loop
+PI_CONTROLLER_T pi_iq;        // Inner Torque Loop
+
+
 
 // =========================================================
 // MAIN PROGRAM
@@ -215,7 +226,8 @@ __interrupt void adc_isr(void)
     clarke_calc.Cs = ((float)Raw_Current_C - Offset_Current_C) * CURRENT_GAIN;
 
     Read_Resolver_Data();
-    Rotor_Angle_Elec = Rotor_Angle_Raw * MOTOR_POLE_PAIRS;
+    Uint16 compensated_angle = Rotor_Angle_Raw - Resolver_Offset;
+    Rotor_Angle_Elec = compensated_angle * MOTOR_POLE_PAIRS;
 
     float angle_rad = (float)Rotor_Angle_Elec * RAD_PER_TICK;
     park_calc.Sine   = sinf(angle_rad);
@@ -232,30 +244,69 @@ __interrupt void adc_isr(void)
     pi_id.Fbk = park_calc.Ds;
     pi_iq.Fbk = park_calc.Qs;
 
-    if (System_State == 1) // RUN MODE
-    {
-        Calc_PI(&pi_id);
-        Calc_PI(&pi_iq);
+    static Uint16 speed_loop_prescaler = 0;
 
-        ipark_calc.Ds = pi_id.Out;
-        ipark_calc.Qs = pi_iq.Out;
-    }
-    else // IDLE MODE (Safe State)
-    {
-        ipark_calc.Ds = 0.0f;
-        ipark_calc.Qs = 0.0f;
-        pi_id.Ui = 0.0f;
-        pi_iq.Ui = 0.0f;
-    }
+        switch(System_State)
+        {
+            case 0: // IDLE (Safe State)
+                ipark_calc.Ds = 0.0f;
+                ipark_calc.Qs = 0.0f;
+                pi_id.Ui = 0.0f;
+                pi_iq.Ui = 0.0f;
+                pi_speed.Ui = 0.0f;
+                State_Timer = 0;
+                break;
+
+            case 1: // ALIGN (Inject DC current to lock rotor to 0 degrees)
+                // Command 2.0 Amps on the D-axis, 0 Amps on Q-axis
+                pi_id.Ref = 2.0f;
+                pi_iq.Ref = 0.0f;
+
+                Calc_PI(&pi_id);
+                Calc_PI(&pi_iq);
+
+                ipark_calc.Ds = pi_id.Out;
+                ipark_calc.Qs = pi_iq.Out;
+
+                // Force the math angle to 0 so the magnetic field freezes in place
+                park_calc.Sine = 0.0f;
+                park_calc.Cosine = 1.0f;
+
+                State_Timer++;
+                // Wait 1 second (20,000 ticks at 50us) for rotor to settle physically
+                if (State_Timer > 20000)
+                {
+                    Resolver_Offset = Rotor_Angle_Raw; // Lock in the calibration
+                    System_State = 2;                  // Transition to RUN
+                }
+                break;
+
+            case 2: // RUN (Full Closed-Loop FOC)
+                // 1. Run Outer Speed Loop (at 2 kHz)
+                if (++speed_loop_prescaler >= 10)
+                {
+                    speed_loop_prescaler = 0;
+                    pi_speed.Fbk = (float)Rotor_Velocity_Raw;
+                    Calc_PI(&pi_speed);
+                }
+
+                // 2. Output of Speed Loop becomes Input of Torque Loop
+                pi_iq.Ref = pi_speed.Out;
+                pi_id.Ref = 0.0f; // Always 0 Amps for surface-mount BLDCs
+
+                // 3. Run Inner Current Loops (at 20 kHz)
+                Calc_PI(&pi_id);
+                Calc_PI(&pi_iq);
+
+                ipark_calc.Ds = pi_id.Out;
+                ipark_calc.Qs = pi_iq.Out;
+                break;
+        }
 
     // --- 4. REVERSE TRANSFORMS (DC to AC) ---
     ipark_calc.Sine = park_calc.Sine;
     ipark_calc.Cosine = park_calc.Cosine;
     Calc_InvPark(&ipark_calc);
-
-    inv_clarke_calc.Alpha = ipark_calc.Alpha;
-    inv_clarke_calc.Beta  = ipark_calc.Beta;
-    Calc_InvClarke(&inv_clarke_calc);
 
     // --- 5. DUTY CYCLE GENERATION ---
     EPwm1Regs.CMPA.half.CMPA = (Uint16)(1875.0f + (inv_clarke_calc.Va * 1875.0f));
@@ -265,6 +316,7 @@ __interrupt void adc_isr(void)
     // --- 6. CLEAR INTERRUPT FLAGS ---
     AdcRegs.ADCST.bit.INT_SEQ1_CLR = 1;
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
+
 }
 
 // =========================================================
@@ -305,6 +357,18 @@ void Init_PI_Controllers(void)
     pi_iq.Ki  = 0.01f;
     pi_iq.Umax = 1.0f;
     pi_iq.Umin = -1.0f;
+
+    // Speed Controller (Regulates RPM, Outputs Target Amps to pi_iq)
+    pi_speed.Ref = 0.0f;       // Target Speed in RPM
+    pi_speed.Fbk = 0.0f;
+    pi_speed.Err = 0.0f;
+    pi_speed.Ui  = 0.0f;
+    pi_speed.Kp  = 0.05f;      // Placeholder speed gain
+    pi_speed.Ki  = 0.001f;     // Placeholder speed gain
+    pi_speed.Umax = 10.0f;     // Max current command (+10 Amps)
+    pi_speed.Umin = -10.0f;    // Min current command (-10 Amps)
+
+
 }
 
 void Init_ePWM_MotorControl(void)
