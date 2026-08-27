@@ -6,7 +6,7 @@ The architecture is designed for deterministic, real-time execution, leveraging 
 
 ---
 
-## ⚙️ Hardware Architecture
+## Hardware Architecture
 
 *   **Microcontroller:** TI TMS320F28335 (150 MHz)
 *   **Gate Driver:** Texas Instruments DRV8323
@@ -21,7 +21,7 @@ The architecture is designed for deterministic, real-time execution, leveraging 
 
 ---
 
-## 🧠 Firmware & Control Architecture
+## Firmware & Control Architecture
 
 The core FOC pipeline executes entirely within a deterministic **20 kHz hardware interrupt** (`adc_isr`), triggered synchronously by the ePWM1 zero-event to ensure noise-free ADC sampling.
 
@@ -40,7 +40,7 @@ Every 50 µs, the DSP performs the following sequence:
 
 ---
 
-## 🚦 System State Machine
+## System State Machine
 
 To prevent integral windup and ensure safe startup, the motor control logic is governed by a 3-state machine:
 
@@ -52,7 +52,7 @@ To prevent integral windup and ensure safe startup, the motor control logic is g
 
 ---
 
-## 🛡️ Safety & Fault Handling
+## Safety & Fault Handling
 
 *   **Resolver Fault Monitoring:** The background CPU loop continuously monitors the `RDC_DOS` (Degradation of Signal) and `RDC_LOT` (Loss of Tracking) hardware pins. If a fault is detected, the system immediately drops to `IDLE`.
 *   **Integral Anti-Windup:** PI controllers feature strict upper and lower saturation limits (`Umax`, `Umin`).
@@ -60,12 +60,12 @@ To prevent integral windup and ensure safe startup, the motor control logic is g
 
 ---
 
-## 🚀 Current Status & TODOs
+## Current Status & TODOs
 
 The software logic is fully implemented, compiling with 0 errors. Development is currently paused pending physical hardware integration.
 
 **Pending Hardware Tasks:**
-- [ ] **Hardware Trip Zone (Milestone 10):** Map the physical `GD_FAULT` GPIO pin to the DSP's Trip Zone (TZ) module for instant, hardware-level PWM kill on short circuit.
-- [ ] **PI Tuning:** Connect to a physical motor to perform step-response tuning on `Kp` and `Ki` values for the Id, Iq, and Speed controllers.
+-  **Hardware Trip Zone (Milestone 10):** Map the physical `GD_FAULT` GPIO pin to the DSP's Trip Zone (TZ) module for instant, hardware-level PWM kill on short circuit.
+-  **PI Tuning:** Connect to a physical motor to perform step-response tuning on `Kp` and `Ki` values for the Id, Iq, and Speed controllers.
 
 ---

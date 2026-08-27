@@ -37,9 +37,9 @@
 // ---------------------------------------------------------
 // MATH & MOTOR CONSTANTS
 // ---------------------------------------------------------
-#define MOTOR_POLE_PAIRS      4  // Placeholder: Ask HW team
+#define MOTOR_POLE_PAIRS      1
 #define ONE_DIVIDED_BY_SQRT3  0.57735026919f
-#define CURRENT_GAIN          0.015f
+#define CURRENT_GAIN          0.003222656f
 #define RAD_PER_TICK          0.00009587379f
 
 // =========================================================
