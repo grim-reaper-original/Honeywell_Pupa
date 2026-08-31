@@ -10,7 +10,7 @@
 #define READ_RDC_DOS()    (GpioDataRegs.GPCDAT.bit.GPIO84)
 #define READ_RDC_LOT()    (GpioDataRegs.GPCDAT.bit.GPIO85)
 
-#define RDC_CS_LOW()      (GpioDataRegs.GPACLEAR.bit.GPIO19 = 1)
+#define     _LOW()      (GpioDataRegs.GPACLEAR.bit.GPIO19 = 1)
 #define RDC_CS_HIGH()     (GpioDataRegs.GPASET.bit.GPIO19 = 1)
 #define RDC_A0_LOW()      (GpioDataRegs.GPACLEAR.bit.GPIO20 = 1)
 #define RDC_A0_HIGH()     (GpioDataRegs.GPASET.bit.GPIO20 = 1)
@@ -100,7 +100,7 @@ void Init_SPI_GateDriver(void);
 void Init_ePWM_MotorControl(void);
 void Init_PI_Controllers(void);
 void Calc_InvClarke(INV_CLARKE_T *v);
-void AD2S1210_SetResolution_12Bit(void);
+void AD2S1210_Configure(void)
 void Read_Resolver_Data(void);
 Uint16 SPI_ReadWrite_16(Uint16 tx_data);
 void DRV8323_WakeUp(void);
@@ -551,13 +551,47 @@ Uint16 SPI_B_ReadWrite_16(Uint16 tx_data)
     return rx_data;
 }
 
-void AD2S1210_SetResolution_12Bit(void)
+// Helper function to correctly frame 8-bit Configuration Writes
+void AD2S1210_WriteRegister(Uint16 address, Uint16 data)
 {
+    // 1. Enter Configuration Mode (A0 = 1, A1 = 1)
     RDC_A0_HIGH();
     RDC_A1_HIGH();
-    DELAY_US(10);
-    SPI_ReadWrite_16(0x9277);
-    DELAY_US(10);
+    DELAY_US(1);
+
+    // 2. Write the 8-bit Address
+    RDC_CS_LOW();
+    SPI_A_Transfer(address, 8);
+    RDC_CS_HIGH(); // Must toggle high between Address and Data
+
+    // t9: Delay between successive write cycles
+    DELAY_US(1);
+
+    // 3. Write the 8-bit Data
+    RDC_CS_LOW();
+    SPI_A_Transfer(data, 8);
+    RDC_CS_HIGH();
+}
+
+
+void AD2S1210_Configure(void)
+{
+    // --- 1. Set to 12-Bit Resolution ---
+    // Register Address: 0x92
+    // Data: 0x7A (Sets both Encoder and Digital resolution to 12-bit)
+    AD2S1210_WriteRegister(0x92, 0x7A);
+
+    // --- 2. Set LOS Threshold to 1.0 Volts ---
+    // Register Address: 0x88
+    // Data: 0x1A (1.0V / 38mV per LSB = 26 = 0x1A)
+    AD2S1210_WriteRegister(0x88, 0x1A);
+
+    // --- 3. Set Excitation Frequency to 10 kHz ---
+    // Register Address: 0x91
+    // Data: 0x28 (FCW = (10000 * 32768) / 8192000 = 40 = 0x28)
+    AD2S1210_WriteRegister(0x91, 0x28);
+
+    // Return to Normal Mode (A0=0, A1=0) to prepare for motor tracking
     RDC_A0_LOW();
     RDC_A1_LOW();
     DELAY_US(100);
