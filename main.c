@@ -1,23 +1,12 @@
 #include "DSP2833x_Device.h"
 #include "DSP2833x_Examples.h"
 #include <math.h>
+#include "ADC.c"
+#include "RDC.c"
 
 // ---------------------------------------------------------
 // RESOLVER HARDWARE PIN MAPPINGS (Confirmed from Schematic)
 // ---------------------------------------------------------
-
-// RDC FAULT PINS (Port C Inputs)
-#define READ_RDC_DOS()    (GpioDataRegs.GPCDAT.bit.GPIO84)
-#define READ_RDC_LOT()    (GpioDataRegs.GPCDAT.bit.GPIO85)
-
-#define     _LOW()      (GpioDataRegs.GPACLEAR.bit.GPIO19 = 1)
-#define RDC_CS_HIGH()     (GpioDataRegs.GPASET.bit.GPIO19 = 1)
-#define RDC_A0_LOW()      (GpioDataRegs.GPACLEAR.bit.GPIO20 = 1)
-#define RDC_A0_HIGH()     (GpioDataRegs.GPASET.bit.GPIO20 = 1)
-#define RDC_A1_LOW()      (GpioDataRegs.GPACLEAR.bit.GPIO21 = 1)
-#define RDC_A1_HIGH()     (GpioDataRegs.GPASET.bit.GPIO21 = 1)
-#define RDC_SAMPLE_LOW()  (GpioDataRegs.GPACLEAR.bit.GPIO23 = 1)
-#define RDC_SAMPLE_HIGH() (GpioDataRegs.GPASET.bit.GPIO23 = 1)
 
 // ---------------------------------------------------------
 // GATE DRIVER HARDWARE PIN MAPPINGS
@@ -95,12 +84,10 @@ typedef struct {
 // FUNCTION PROTOTYPES
 // =========================================================
 void Init_ADC_CurrentSensors(void);
-void Init_SPI_RDC(void);
 void Init_SPI_GateDriver(void);
 void Init_ePWM_MotorControl(void);
 void Init_PI_Controllers(void);
 void Calc_InvClarke(INV_CLARKE_T *v);
-void AD2S1210_Configure(void)
 void Read_Resolver_Data(void);
 Uint16 SPI_ReadWrite_16(Uint16 tx_data);
 void DRV8323_WakeUp(void);
@@ -118,17 +105,6 @@ __interrupt void adc_isr(void);
 // =========================================================
 // GLOBAL VARIABLES
 // =========================================================
-Uint16 Raw_Current_A = 0;
-Uint16 Raw_Current_B = 0;
-Uint16 Raw_Current_C = 0;
-float Offset_Current_A = 2048.0f;
-float Offset_Current_B = 2048.0f;
-float Offset_Current_C = 2048.0f;
-
-Uint16 Rotor_Angle_Raw = 0;
-Uint16 Rotor_Angle_Elec = 0;
-int16  Rotor_Velocity_Raw = 0;
-Uint16 RDC_Fault_Flag = 0;
 
 Uint16 GD_Test_Readback = 0;
 Uint16 GD_Fault_Status = 0;
@@ -175,7 +151,6 @@ void main(void)
     InitAdc();
     Init_ADC_CurrentSensors();
     Init_SPI_RDC();
-    AD2S1210_SetResolution_12Bit();
 
     Init_SPI_GateDriver();
     DRV8323_WakeUp();
@@ -219,11 +194,10 @@ __interrupt void adc_isr(void)
     // --- 1. SENSOR FEEDBACK ---
     Raw_Current_A = (AdcRegs.ADCRESULT0 >> 4);
     Raw_Current_B = (AdcRegs.ADCRESULT1 >> 4);
-    Raw_Current_C = (AdcRegs.ADCRESULT2 >> 4);
 
     clarke_calc.As = ((float)Raw_Current_A - Offset_Current_A) * CURRENT_GAIN;
     clarke_calc.Bs = ((float)Raw_Current_B - Offset_Current_B) * CURRENT_GAIN;
-    clarke_calc.Cs = ((float)Raw_Current_C - Offset_Current_C) * CURRENT_GAIN;
+    clarke_calc.Cs = -(clarke_calc.As+clarke_calc.Bs);
 
     Read_Resolver_Data();
     Uint16 compensated_angle = Rotor_Angle_Raw - Resolver_Offset;
@@ -322,21 +296,7 @@ __interrupt void adc_isr(void)
 // =========================================================
 // HARDWARE INITIALIZATION FUNCTIONS
 // =========================================================
-void Init_ADC_CurrentSensors(void)
-{
-    EALLOW;
-    AdcRegs.ADCTRL1.bit.ACQ_PS = 0x0F;
-    AdcRegs.ADCTRL1.bit.SEQ_CASC = 1;
-    AdcRegs.ADCTRL3.bit.ADCCLKPS = 0x03;
-    AdcRegs.ADCTRL3.bit.SMODE_SEL = 0;
-    AdcRegs.ADCMAXCONV.bit.MAX_CONV1 = 2;
-    AdcRegs.ADCCHSELSEQ1.bit.CONV00 = 0x0;
-    AdcRegs.ADCCHSELSEQ1.bit.CONV01 = 0x8;
-    AdcRegs.ADCCHSELSEQ1.bit.CONV02 = 0xA;
-    AdcRegs.ADCTRL2.bit.EPWM_SOCA_SEQ1 = 1;
-    AdcRegs.ADCTRL2.bit.INT_ENA_SEQ1 = 1;
-    EDIS;
-}
+
 
 void Init_PI_Controllers(void)
 {
@@ -386,10 +346,10 @@ void Init_ePWM_MotorControl(void)
 
     // Master ePWM 1
     EPwm1Regs.TBPRD = 3750;
-    EPwm1Regs.TBPHS.half.TBPHS = 0;
-    EPwm1Regs.TBCTL.bit.CTRMODE = 2;
-    EPwm1Regs.TBCTL.bit.PHSEN = 0;
-    EPwm1Regs.TBCTL.bit.SYNCOSEL = 1;
+    EPwm1Regs.TBPHS.half.TBPHS = 0; //  phase register TBPHS = 0
+    EPwm1Regs.TBCTL.bit.CTRMODE = 2; // up down counting
+    EPwm1Regs.TBCTL.bit.PHSEN = 0;  // no phase loading for pwm1, making it master
+    EPwm1Regs.TBCTL.bit.SYNCOSEL = 1;  //synchronisation select such that TBCTR = 0x0000
     EPwm1Regs.CMPA.half.CMPA = 1875;
     EPwm1Regs.CMPCTL.bit.SHDWAMODE = 0;
     EPwm1Regs.CMPCTL.bit.LOADAMODE = 0;
@@ -483,62 +443,7 @@ void Init_SPI_GateDriver(void)
     McbspbRegs.SPCR2.bit.FRST = 1;
 }
 
-void Init_SPI_RDC(void)
-{
-    EALLOW;
-    GpioCtrlRegs.GPAPUD.all &= ~0x00070000;
-    GpioCtrlRegs.GPAQSEL2.bit.GPIO16 = 3;
-    GpioCtrlRegs.GPAQSEL2.bit.GPIO17 = 3;
-    GpioCtrlRegs.GPAQSEL2.bit.GPIO18 = 3;
 
-    GpioCtrlRegs.GPCMUX2.bit.GPIO84 = 0;
-    GpioCtrlRegs.GPCMUX2.bit.GPIO85 = 0;
-    GpioCtrlRegs.GPCDIR.bit.GPIO84 = 0;
-    GpioCtrlRegs.GPCDIR.bit.GPIO85 = 0;
-    GpioCtrlRegs.GPCPUD.bit.GPIO84 = 0;
-    GpioCtrlRegs.GPCPUD.bit.GPIO85 = 0;
-
-    GpioCtrlRegs.GPAMUX2.bit.GPIO16 = 1;
-    GpioCtrlRegs.GPAMUX2.bit.GPIO17 = 1;
-    GpioCtrlRegs.GPAMUX2.bit.GPIO18 = 1;
-
-    GpioCtrlRegs.GPAMUX2.bit.GPIO19 = 0;
-    GpioCtrlRegs.GPAMUX2.bit.GPIO20 = 0;
-    GpioCtrlRegs.GPAMUX2.bit.GPIO21 = 0;
-    GpioCtrlRegs.GPAMUX2.bit.GPIO23 = 0;
-
-    GpioCtrlRegs.GPADIR.bit.GPIO19 = 1;
-    GpioCtrlRegs.GPADIR.bit.GPIO20 = 1;
-    GpioCtrlRegs.GPADIR.bit.GPIO21 = 1;
-    GpioCtrlRegs.GPADIR.bit.GPIO23 = 1;
-    EDIS;
-
-    RDC_CS_HIGH();
-    RDC_SAMPLE_HIGH();
-    RDC_A0_LOW();
-    RDC_A1_LOW();
-
-    SpiaRegs.SPICCR.bit.SPISWRESET = 0;
-    SpiaRegs.SPICCR.all = 0x000F;
-    SpiaRegs.SPICTL.all = 0x0006;
-    SpiaRegs.SPIBRR = 4;
-    SpiaRegs.SPICCR.bit.SPISWRESET = 1;
-
-    SpiaRegs.SPIFFTX.all = 0xE040;
-    SpiaRegs.SPIFFRX.all = 0x2044;
-    SpiaRegs.SPIFFCT.all = 0x0;
-}
-
-Uint16 SPI_ReadWrite_16(Uint16 tx_data)
-{
-    while(SpiaRegs.SPIFFTX.bit.TXFFST != 0) { }
-    RDC_CS_LOW();
-    SpiaRegs.SPITXBUF = tx_data;
-    while(SpiaRegs.SPIFFRX.bit.RXFFST == 0) { }
-    Uint16 rx_data = SpiaRegs.SPIRXBUF;
-    RDC_CS_HIGH();
-    return rx_data;
-}
 
 Uint16 SPI_B_ReadWrite_16(Uint16 tx_data)
 {
@@ -551,64 +456,7 @@ Uint16 SPI_B_ReadWrite_16(Uint16 tx_data)
     return rx_data;
 }
 
-// Helper function to correctly frame 8-bit Configuration Writes
-void AD2S1210_WriteRegister(Uint16 address, Uint16 data)
-{
-    // 1. Enter Configuration Mode (A0 = 1, A1 = 1)
-    RDC_A0_HIGH();
-    RDC_A1_HIGH();
-    DELAY_US(1);
 
-    // 2. Write the 8-bit Address
-    RDC_CS_LOW();
-    SPI_A_Transfer(address, 8);
-    RDC_CS_HIGH(); // Must toggle high between Address and Data
-
-    // t9: Delay between successive write cycles
-    DELAY_US(1);
-
-    // 3. Write the 8-bit Data
-    RDC_CS_LOW();
-    SPI_A_Transfer(data, 8);
-    RDC_CS_HIGH();
-}
-
-
-void AD2S1210_Configure(void)
-{
-    // --- 1. Set to 12-Bit Resolution ---
-    // Register Address: 0x92
-    // Data: 0x7A (Sets both Encoder and Digital resolution to 12-bit)
-    AD2S1210_WriteRegister(0x92, 0x7A);
-
-    // --- 2. Set LOS Threshold to 1.0 Volts ---
-    // Register Address: 0x88
-    // Data: 0x1A (1.0V / 38mV per LSB = 26 = 0x1A)
-    AD2S1210_WriteRegister(0x88, 0x1A);
-
-    // --- 3. Set Excitation Frequency to 10 kHz ---
-    // Register Address: 0x91
-    // Data: 0x28 (FCW = (10000 * 32768) / 8192000 = 40 = 0x28)
-    AD2S1210_WriteRegister(0x91, 0x28);
-
-    // Return to Normal Mode (A0=0, A1=0) to prepare for motor tracking
-    RDC_A0_LOW();
-    RDC_A1_LOW();
-    DELAY_US(100);
-}
-
-void Read_Resolver_Data(void)
-{
-    RDC_SAMPLE_LOW();
-    DELAY_US(1);
-    RDC_A0_LOW();
-    RDC_A1_LOW();
-    Rotor_Angle_Raw = SPI_ReadWrite_16(0x0000);
-    RDC_A0_LOW();
-    RDC_A1_HIGH();
-    Rotor_Velocity_Raw = (int16)SPI_ReadWrite_16(0x0000);
-    RDC_SAMPLE_HIGH();
-}
 
 void DRV8323_WakeUp(void)
 {
