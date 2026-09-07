@@ -15,11 +15,15 @@
 #define RDC_SAMPLE_HIGH() (GpioDataRegs.GPASET.bit.GPIO23 = 1)
 
 
+volatile Uint16 Motor_PolePairs = 4;
+volatile float Angle_Offset = 0.0f;
+
 Uint16 Rotor_Angle_Raw = 0;
 int16  Rotor_Velocity_Raw = 0;
 Uint16 Resolver_Fault_Register = 0;
 Uint16 Rotor_Angle_12 = 0;
 int16 Rotor_Velocity_12 = 0;
+
 
 void Init_SPI_RDC(void);
 static Uint16 SPI_A_Transfer_8(Uint16 tx_data);
@@ -27,6 +31,9 @@ static void AD2S1210_WriteRegister(Uint16 address, Uint16 data);
 void AD2S1210_Configure(void);
 void AD2S1210_Clear_Startup_Faults(void);
 void Read_Resolver_Data(void);
+float RDC_GetMechanicalAngle(void);
+float RDC_GetElectricalAngle(void);
+
 
 
 //THIS ENTIRE SECTION BELONGS IN MAIN.C
@@ -222,4 +229,27 @@ void Read_Resolver_Data(void)
 
     // 4. Release the internal registers
     RDC_SAMPLE_HIGH();
+}
+
+float RDC_GetMechanicalAngle(void)
+{
+    return ((float)Rotor_Angle_12 * 2.0f * PI) / 4096.0f;
+}
+
+float RDC_GetElectricalAngle(void)
+{
+    float theta_mech;
+    float theta_elec;
+
+    theta_mech = RDC_GetMechanicalAngle();
+
+    theta_elec = theta_mech * Motor_PolePairs + Angle_Offset;
+
+    while(theta_elec >= 2.0f * PI)
+        theta_elec -= 2.0f * PI;
+
+    while(theta_elec < 0.0f)
+        theta_elec += 2.0f * PI;
+
+    return theta_elec;
 }

@@ -350,20 +350,20 @@ void Init_ePWM_MotorControl(void)
     EPwm1Regs.TBCTL.bit.CTRMODE = 2; // up down counting
     EPwm1Regs.TBCTL.bit.PHSEN = 0;  // no phase loading for pwm1, making it master
     EPwm1Regs.TBCTL.bit.SYNCOSEL = 1;  //synchronisation select such that TBCTR = 0x0000
-    EPwm1Regs.CMPA.half.CMPA = 1875;
-    EPwm1Regs.CMPCTL.bit.SHDWAMODE = 0;
-    EPwm1Regs.CMPCTL.bit.LOADAMODE = 0;
+    EPwm1Regs.CMPA.half.CMPA = 1875; //sets initial duty cycle to 50%
+    EPwm1Regs.CMPCTL.bit.SHDWAMODE = 0; //enable shadow registers
+    EPwm1Regs.CMPCTL.bit.LOADAMODE = 0; //
     EPwm1Regs.AQCTLA.bit.CAU = 2;
     EPwm1Regs.AQCTLA.bit.CAD = 1;
     EPwm1Regs.DBCTL.bit.OUT_MODE = 3;
     EPwm1Regs.DBCTL.bit.POLSEL = 2;
-    EPwm1Regs.DBRED = 150;
+    EPwm1Regs.DBRED = 150;  // 150*6.67ns = 1us delay
     EPwm1Regs.DBFED = 150;
     EPwm1Regs.TZCTL.bit.TZA = 2;
     EPwm1Regs.TZCTL.bit.TZB = 2;
-    EPwm1Regs.ETSEL.bit.SOCAEN = 1;
-    EPwm1Regs.ETSEL.bit.SOCASEL = 1;
-    EPwm1Regs.ETPS.bit.SOCAPRD = 1;
+    EPwm1Regs.ETSEL.bit.SOCAEN = 1; //enable start of conversion A
+    EPwm1Regs.ETSEL.bit.SOCASEL = 1; //enable event TBCTR = 0
+    EPwm1Regs.ETPS.bit.SOCAPRD = 1; //generate SOCA pulse on first SOCA event
 
     // Slave ePWM 2
     EPwm2Regs.TBPRD = 3750;

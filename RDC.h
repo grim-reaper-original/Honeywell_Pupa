@@ -26,5 +26,7 @@ void AD2S1210_Configure(void);
 void AD2S1210_Clear_Startup_Faults(void);
 
 void Read_Resolver_Data(void);
+float RDC_GetMechanicalAngle(void);
+float RDC_GetElectricalAngle(void);
 
 #endif
