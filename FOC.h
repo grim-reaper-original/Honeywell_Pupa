@@ -25,6 +25,9 @@ extern volatile float Va_mod;
 extern volatile float Vb_mod;
 extern volatile float Vc_mod;
 
+extern volatile float V_max;
+extern volatile float V_min;
+
 extern volatile float Duty_A;
 extern volatile float Duty_B;
 extern volatile float Duty_C;
@@ -41,5 +44,6 @@ void Inverse_Clarke(void);
 void Zero_Sequence_Modulation(void);
 void Modulation_to_Duty(void);
 void Duty_to_CMPA(void);
+void FOC_OpenLoopStep(void);
 
 #endif

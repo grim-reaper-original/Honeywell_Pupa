@@ -26,6 +26,9 @@ volatile float Va_mod=0.0f;
 volatile float Vb_mod=0.0f;
 volatile float Vc_mod=0.0f;
 
+volatile float V_max = 0.0f;
+volatile float V_min = 0.0f;
+
 volatile float Duty_A=0.0f;
 volatile float Duty_B=0.0f;
 volatile float Duty_C=0.0f;
