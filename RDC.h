@@ -15,6 +15,9 @@ extern Uint16 Resolver_Fault_Register;
 extern Uint16 Rotor_Angle_12;
 extern int16  Rotor_Velocity_12;
 
+extern volatile Uint16 Motor_PolePairs;
+extern volatile float Angle_Offset;
+
 
 // =========================================================
 // Public RDC functions

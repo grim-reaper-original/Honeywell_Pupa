@@ -41,7 +41,7 @@ void Init_ePWM_MotorControl(void)
     // -----------------------------------------------------
     EPwm1Regs.TBPRD = 3750;
     EPwm1Regs.TBPHS.half.TBPHS = 0;
-    EPwm1Regs.TBCTL.bit.CTRMODE = 2; // Up-down counting
+    EPwm1Regs.TBCTL.bit.CTRMODE = 2; // Up-down counting upto 3750 (Centre aligned PWM)
     EPwm1Regs.TBCTL.bit.PHSEN = 0;   // Master module
     EPwm1Regs.TBCTL.bit.SYNCOSEL = 1; // Send sync pulse at TBCTR = 0x0000
 
@@ -49,11 +49,11 @@ void Init_ePWM_MotorControl(void)
     EPwm1Regs.CMPCTL.bit.SHDWAMODE = 0;
     EPwm1Regs.CMPCTL.bit.LOADAMODE = 0;
 
-    EPwm1Regs.AQCTLA.bit.CAU = 2;
-    EPwm1Regs.AQCTLA.bit.CAD = 1;
+    EPwm1Regs.AQCTLA.bit.CAU = 2; //Set bit on upcount
+    EPwm1Regs.AQCTLA.bit.CAD = 1; //Clear bit on downcount
 
-    EPwm1Regs.DBCTL.bit.OUT_MODE = 3;
-    EPwm1Regs.DBCTL.bit.POLSEL = 2; // Active High Complementary
+    EPwm1Regs.DBCTL.bit.OUT_MODE = 3;   //full dead band generation (delay enabled for both rising and falling edge for A and B respectively)
+    EPwm1Regs.DBCTL.bit.POLSEL = 2; // Active High Complementary (PWM1 - Active High. PWM2 - Active low for complementary A and B High and Low)
     EPwm1Regs.DBRED = 150;          // 1.0us Deadband
     EPwm1Regs.DBFED = 150;
 
@@ -61,9 +61,9 @@ void Init_ePWM_MotorControl(void)
     EPwm1Regs.TZCTL.bit.TZB = 2;    // Force LOW on trip
 
     // ADC Trigger (SOCA) at TBCTR = 0
-    EPwm1Regs.ETSEL.bit.SOCAEN = 1;
-    EPwm1Regs.ETSEL.bit.SOCASEL = 1;
-    EPwm1Regs.ETPS.bit.SOCAPRD = 1;
+    EPwm1Regs.ETSEL.bit.SOCAEN = 1;     //actually enables Start of Conversion for A
+    EPwm1Regs.ETSEL.bit.SOCASEL = 2;    //SOCA pulse is generated when TBCTR = TBPRD (3750) i.e middle of the centre-aligned pwm pulse
+    EPwm1Regs.ETPS.bit.SOCAPRD = 1;    //generates SOCA pulse on first event. Does not wait for more than one
 
     // -----------------------------------------------------
     // SLAVE: ePWM 2
@@ -78,8 +78,8 @@ void Init_ePWM_MotorControl(void)
     EPwm2Regs.CMPCTL.bit.SHDWAMODE = 0;
     EPwm2Regs.CMPCTL.bit.LOADAMODE = 0;
 
-    EPwm2Regs.AQCTLA.bit.CAU = 2;
-    EPwm2Regs.AQCTLA.bit.CAD = 1;
+    EPwm2Regs.AQCTLA.bit.CAU = 2;  // Set bit (0->1) on upcount (here = 1875)
+    EPwm2Regs.AQCTLA.bit.CAD = 1;  // Clear bit (1->0) on downcount (here = 1875)
 
     EPwm2Regs.DBCTL.bit.OUT_MODE = 3;
     EPwm2Regs.DBCTL.bit.POLSEL = 2;
@@ -140,4 +140,12 @@ void PWM_ClearTripZone(void)
     EPwm2Regs.TZCLR.bit.OST = 1;
     EPwm3Regs.TZCLR.bit.OST = 1;
     EDIS;
+}
+
+
+void PWM_UpdateDuty(Uint16 cmp_A, Uint16 cmp_B, Uint16 cmp_C)
+{
+    EPwm1Regs.CMPA.half.CMPA = cmp_A;
+    EPwm2Regs.CMPA.half.CMPA = cmp_B;
+    EPwm3Regs.CMPA.half.CMPA = cmp_C;
 }

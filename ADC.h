@@ -26,7 +26,6 @@ extern volatile float I_beta;
 void Init_ADC_CurrentSensors(void);
 void Calibrate_ADC_Offsets(void);
 void Read_ADC_Currents(void);
-void Clarke_Transform(void);
 __interrupt void adc_isr(void);
 
 

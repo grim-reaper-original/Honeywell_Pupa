@@ -14,5 +14,6 @@ void Init_ePWM_MotorControl(void);
 // Hardware Safety Functions
 void PWM_ForceTripZone(void);
 void PWM_ClearTripZone(void);
+void PWM_UpdateDuty(Uint16 cmp_a, Uint16 cmp_b, Uint16 cmp_c);
 
 #endif // PWM_H

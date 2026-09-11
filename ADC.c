@@ -78,13 +78,6 @@ void Read_ADC_Currents(void)
     Current_C = -(Current_A + Current_B);
 }
 
-void Clarke_Transform(void)
-{
-    I_alpha = Current_A;
-
-    I_beta = (Current_A + 2.0f * Current_B)
-             * 0.577350269f;
-}
 
 __interrupt void adc_isr(void)
 {
