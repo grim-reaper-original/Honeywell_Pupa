@@ -278,6 +278,4 @@ This provides a concrete numerical sanity check for the open-loop signal chain.
 
 The development philosophy is to prove each layer before adding feedback: **peripherals → measurements → angle → transforms → modulation → PWM → hardware → current loop → speed loop**. This keeps hardware failures and control-algorithm failures distinguishable.
 
-The next major milestone is therefore not PI tuning. It is proving that the resolver angle, voltage-vector mathematics, ZSM, PWM timing, gate-driver interface and current measurement all behave correctly on the actual hardware.
-
 **Last updated:** 11 September 2026
