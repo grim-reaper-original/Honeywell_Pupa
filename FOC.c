@@ -38,23 +38,6 @@ volatile Uint16 CMPA_b = 1875;
 volatile Uint16 CMPA_c = 1875;
 
 
-//main
-void FOC_OpenLoopStep(void)
-{
-    Clarke_Transform();
-    Park_Transform();
-
-    Vd = 0.0f;
-    Vq = 3.0f;
-
-    Inverse_Park();
-    Inverse_Clarke();
-
-    Zero_Sequence_Modulation();
-    Modulation_to_Duty();
-    Duty_to_CMPA();
-}
-
 
 //functions
 void Clarke_Transform(void)
@@ -161,6 +144,22 @@ void Duty_to_CMPA(void)
     CMPA_b = (Uint16)(Duty_B * 3750.0f);
     CMPA_c = (Uint16)(Duty_C * 3750.0f);
 
+}
+
+void FOC_OpenLoopStep(void)
+{
+    Clarke_Transform();
+    Park_Transform();
+
+    Vd = 0.0f;
+    Vq = 3.0f;
+
+    Inverse_Park();
+    Inverse_Clarke();
+
+    Zero_Sequence_Modulation();
+    Modulation_to_Duty();
+    Duty_to_CMPA();
 }
 
 

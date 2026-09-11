@@ -15,7 +15,7 @@
 #define RDC_SAMPLE_HIGH() (GpioDataRegs.GPASET.bit.GPIO23 = 1)
 
 
-volatile Uint16 Motor_PolePairs = 4;
+volatile Uint16 Motor_PolePairs = 1;
 volatile float Angle_Offset = 0.0f;
 
 Uint16 Rotor_Angle_Raw = 0;
