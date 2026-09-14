@@ -1,6 +1,8 @@
 #include "DSP2833x_Device.h"
 #include "DSP2833x_Examples.h"
 #include "ADC.h"
+#include "RDC.h"
+#include "FOC.h"
 
 volatile Uint32 isr_counter = 0;
 
@@ -81,10 +83,16 @@ void Read_ADC_Currents(void)
 
 __interrupt void adc_isr(void)
 {
-    isr_counter++; //count ADC counts
+    isr_counter++;
+
+    // 1. Read Sensors
     Read_ADC_Currents();
+    Read_Resolver_Data(); // Angle updates
 
-    AdcRegs.ADCST.bit.INT_SEQ1_CLR = 1; //clear interrupt flag
+    // 2. Run the math and update PWMs
+    FOC_OpenLoopStep();   // This executes Clarke->Park->ZSM->PWM_UpdateDuty
 
-    PieCtrlRegs.PIEACK.all = PIEACK_GROUP1; //ack PIE group
+    // 3. Clear hardware flags
+    AdcRegs.ADCST.bit.INT_SEQ1_CLR = 1;
+    PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
 }

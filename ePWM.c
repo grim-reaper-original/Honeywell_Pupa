@@ -1,24 +1,5 @@
-#include "pwm.h"
+#include "ePWM.h"
 
-
-int main(void)
-{
-    InitSysCtrl();
-    InitGpio();
-    Init_ePWM_MotorControl();
-
-    DELAY_US(5000000);
-
-    PWM_ForceTripZone();
-
-    DELAY_US(5000000);
-
-    PWM_ClearTripZone();
-
-    while(1)
-    {
-    }
-}
 
 void Init_ePWM_MotorControl(void)
 {
@@ -145,7 +126,9 @@ void PWM_ClearTripZone(void)
 
 void PWM_UpdateDuty(Uint16 cmp_A, Uint16 cmp_B, Uint16 cmp_C)
 {
+    EALLOW;
     EPwm1Regs.CMPA.half.CMPA = cmp_A;
     EPwm2Regs.CMPA.half.CMPA = cmp_B;
     EPwm3Regs.CMPA.half.CMPA = cmp_C;
+    EDIS;
 }

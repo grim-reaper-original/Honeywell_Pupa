@@ -1,5 +1,6 @@
 #include "RDC.h"
 
+#define PI 3.14159265359f
 
 #define READ_RDC_DOS()    (GpioDataRegs.GPCDAT.bit.GPIO84)
 #define READ_RDC_LOT()    (GpioDataRegs.GPCDAT.bit.GPIO85)
@@ -13,6 +14,7 @@
 #define RDC_A1_HIGH()     (GpioDataRegs.GPASET.bit.GPIO21 = 1)
 #define RDC_SAMPLE_LOW()  (GpioDataRegs.GPACLEAR.bit.GPIO23 = 1)
 #define RDC_SAMPLE_HIGH() (GpioDataRegs.GPASET.bit.GPIO23 = 1)
+
 
 
 volatile Uint16 Motor_PolePairs = 1;

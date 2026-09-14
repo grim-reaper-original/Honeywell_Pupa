@@ -37,6 +37,8 @@ volatile Uint16 CMPA_a = 1875;
 volatile Uint16 CMPA_b = 1875;
 volatile Uint16 CMPA_c = 1875;
 
+volatile float theta_e = 0.0f;
+
 
 
 //functions
@@ -51,7 +53,6 @@ void Clarke_Transform(void)
 
 void Park_Transform(void)
 {
-    float theta_e;
     float sin_theta;
     float cos_theta;
 
@@ -69,7 +70,6 @@ void Park_Transform(void)
 
 void Inverse_Park(void)
 {
-    float theta_e;
     float sin_theta;
     float cos_theta;
 
@@ -78,8 +78,8 @@ void Inverse_Park(void)
     sin_theta=sinf(theta_e);
     cos_theta=cosf(theta_e);
 
-    V_alpha = V_d*cos_theta - V_q*sin_theta;
-    V_beta = V_d*sin_theta + V_q*cos_theta;
+    V_alpha = Vd*cos_theta - Vq*sin_theta;
+    V_beta = Vd*sin_theta + Vq*cos_theta;
 }
 
 
@@ -160,6 +160,8 @@ void FOC_OpenLoopStep(void)
     Zero_Sequence_Modulation();
     Modulation_to_Duty();
     Duty_to_CMPA();
+
+    PWM_UpdateDuty(CMPA_a, CMPA_b, CMPA_c);
 }
 
 
