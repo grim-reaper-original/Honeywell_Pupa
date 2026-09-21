@@ -4,6 +4,7 @@
 #define CURRENT_GAIN 0.003222656f
 
 extern volatile Uint32 isr_counter;
+extern volatile Uint16 Motor_Enable;
 
 #include "DSP2833x_Device.h"
 #include "DSP2833x_Examples.h"
@@ -27,6 +28,7 @@ void Init_ADC_CurrentSensors(void);
 void Calibrate_ADC_Offsets(void);
 void Read_ADC_Currents(void);
 __interrupt void adc_isr(void);
+void Init_ADC_Trigger_Marker(void);
 
 
 #endif

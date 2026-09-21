@@ -2,8 +2,12 @@
 #include "DSP2833x_Examples.h"
 #include "ADC.h"
 #include "RDC.h"
-#include "pwm.h"
+#include "ePWM.h"
 #include "FOC.h"
+
+volatile Uint16 Motor_Enable = 0;
+volatile Uint32 Main_Loop_Counter = 0;
+
 
 extern __interrupt void adc_isr(void);
 
@@ -21,8 +25,13 @@ void main(void)
     PieVectTable.ADCINT = &adc_isr;
     EDIS;
 
+
+
     // Initialize all hardware modules
     InitGpio();
+    Init_ADC_Trigger_Marker(); //creates marker that enables every time adc triggers
+
+
     InitAdc();
     Init_ADC_CurrentSensors();
     Calibrate_ADC_Offsets(); // Motor MUST be off here!
@@ -34,6 +43,8 @@ void main(void)
 
     Init_ePWM_MotorControl();
 
+    Motor_Enable = 0;
+    PWM_ForceTripZone();
     // Enable Interrupts
     PieCtrlRegs.PIEIER1.bit.INTx6 = 1;
     IER |= M_INT1;
@@ -42,12 +53,25 @@ void main(void)
 
     // Background Safety Loop
     while(1)
-    {
-        // Monitor AD2S1210 hardware fault pins
-        // (Assuming READ_RDC_DOS and READ_RDC_LOT are in a header file or read here)
-        if (GpioDataRegs.GPCDAT.bit.GPIO84 == 0 || GpioDataRegs.GPCDAT.bit.GPIO85 == 0)
+       {
+        // Resolver fault has highest priority
+        if(GpioDataRegs.GPCDAT.bit.GPIO84 == 0 ||
+           GpioDataRegs.GPCDAT.bit.GPIO85 == 0)
+        {
+            Motor_Enable = 0;
+            PWM_ForceTripZone();
+        }
+
+        // Motor disabled
+        else if(Motor_Enable == 0)
         {
             PWM_ForceTripZone();
         }
-    }
+
+        // Motor enabled and resolver healthy
+        else
+        {
+            PWM_ClearTripZone();
+           }
+       }
 }

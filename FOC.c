@@ -33,9 +33,9 @@ volatile float Duty_A=0.0f;
 volatile float Duty_B=0.0f;
 volatile float Duty_C=0.0f;
 
-volatile Uint16 CMPA_a = 1875;
-volatile Uint16 CMPA_b = 1875;
-volatile Uint16 CMPA_c = 1875;
+volatile Uint16 CMPA_a = 1562;
+volatile Uint16 CMPA_b = 1562;
+volatile Uint16 CMPA_c = 1562;
 
 volatile float theta_e = 0.0f;
 
@@ -140,9 +140,9 @@ void Modulation_to_Duty(void)
 
 void Duty_to_CMPA(void)
 {
-    CMPA_a = (Uint16)(Duty_A * 3750.0f);
-    CMPA_b = (Uint16)(Duty_B * 3750.0f);
-    CMPA_c = (Uint16)(Duty_C * 3750.0f);
+    CMPA_a = (Uint16)(Duty_A * 3125.0f);
+    CMPA_b = (Uint16)(Duty_B * 3125.0f);
+    CMPA_c = (Uint16)(Duty_C * 3125.0f);
 
 }
 

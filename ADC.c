@@ -83,6 +83,8 @@ void Read_ADC_Currents(void)
 
 __interrupt void adc_isr(void)
 {
+    GpioDataRegs.GPASET.bit.GPIO10 = 1;
+
     isr_counter++;
 
     // 1. Read Sensors
@@ -90,9 +92,28 @@ __interrupt void adc_isr(void)
     Read_Resolver_Data(); // Angle updates
 
     // 2. Run the math and update PWMs
-    FOC_OpenLoopStep();   // This executes Clarke->Park->ZSM->PWM_UpdateDuty
+    if(Motor_Enable)
+        {
+            FOC_OpenLoopStep();
+        }                // This executes Clarke->Park->ZSM->PWM_UpdateDuty
+
+    GpioDataRegs.GPACLEAR.bit.GPIO10 = 1;
 
     // 3. Clear hardware flags
     AdcRegs.ADCST.bit.INT_SEQ1_CLR = 1;
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
+}
+
+void Init_ADC_Trigger_Marker(void)
+{
+    EALLOW;
+
+    // GPIO10 as general-purpose output
+    GpioCtrlRegs.GPAMUX1.bit.GPIO10 = 0;
+    GpioCtrlRegs.GPADIR.bit.GPIO10 = 1;
+
+    // Start LOW
+    GpioDataRegs.GPACLEAR.bit.GPIO10 = 1;
+
+    EDIS;
 }

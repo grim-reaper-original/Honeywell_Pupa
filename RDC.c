@@ -227,7 +227,7 @@ void Read_Resolver_Data(void)
     RDC_WR_FSYNC_HIGH();
 
     Rotor_Velocity_Raw = (int16)((high_byte << 8) | low_byte);
-    Rotor_Velocity_12 = Rotor_Velocity_Raw >> 4;
+    Rotor_Velocity_12 = Rotor_Velocity_Raw >> 3;
 
     // 4. Release the internal registers
     RDC_SAMPLE_HIGH();

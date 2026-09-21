@@ -75,6 +75,9 @@
 							<tool id="com.ti.ccstudio.buildDefinitions.C2000_22.6.hex.1250410833" name="C2000 Hex Utility" superClass="com.ti.ccstudio.buildDefinitions.C2000_22.6.hex"/>
 						</toolChain>
 					</folderInfo>
+					<sourceEntries>
+						<entry excluding="Tests/RDC_test(9-9-26)_main.c|Tests/ePWM_test.c|Tests/FOC_test.c|Tests/ADC_test.c" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
+					</sourceEntries>
 				</configuration>
 			</storageModule>
 			<storageModule moduleId="org.eclipse.cdt.core.externalSettings"/>
