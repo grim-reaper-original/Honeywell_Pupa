@@ -591,6 +591,7 @@ Final modulation scaling and PWM polarity must be validated against the actual i
 
 # 15. CMPA Generation
 
+<<<<<<< HEAD
 Current conversion:
 
 ```text
@@ -987,3 +988,6 @@ The immediate objective is **not PI tuning**. The immediate objective is to prov
 ---
 
 **Last updated: 21 September 2026**
+=======
+**Last updated:** 11 September 2026
+>>>>>>> branch 'master' of https://github.com/grim-reaper-original/Honeywell_Pupa
