@@ -13,3 +13,8 @@ Release/
 .launches/
 .settings/
 *.cmd.bak
+/ePWM_test.c
+/ePWM_test.h
+/Big_Picture.md
+/ADC_test.c
+/ADC_test.h

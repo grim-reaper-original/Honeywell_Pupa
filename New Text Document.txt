@@ -1,0 +1,36 @@
+Replace the while loop in the main.c with the above version.
+
+    while(1)
+    {
+        if(Motor_Enable == 0)
+        {
+            PWM_ForceTripZone();
+        }
+        else
+        {
+            PWM_ClearTripZone();
+        }
+    }
+
+
+
+
+Open ADC.c, replace the void adc_isr(void) function at the bottom of the file with the following version
+
+
+__interrupt void adc_isr(void)
+{
+    GpioDataRegs.GPASET.bit.GPIO10 = 1;
+
+    isr_counter++;
+
+    Read_ADC_Currents();
+    Read_Resolver_Data();
+
+    FOC_OpenLoopStep();
+
+    GpioDataRegs.GPACLEAR.bit.GPIO10 = 1;
+
+    AdcRegs.ADCST.bit.INT_SEQ1_CLR = 1;
+    PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
+}

@@ -87,19 +87,13 @@ __interrupt void adc_isr(void)
 
     isr_counter++;
 
-    // 1. Read Sensors
     Read_ADC_Currents();
-    Read_Resolver_Data(); // Angle updates
+    Read_Resolver_Data();
 
-    // 2. Run the math and update PWMs
-    if(Motor_Enable)
-        {
-            FOC_OpenLoopStep();
-        }                // This executes Clarke->Park->ZSM->PWM_UpdateDuty
+    FOC_OpenLoopStep();
 
     GpioDataRegs.GPACLEAR.bit.GPIO10 = 1;
 
-    // 3. Clear hardware flags
     AdcRegs.ADCST.bit.INT_SEQ1_CLR = 1;
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
 }
