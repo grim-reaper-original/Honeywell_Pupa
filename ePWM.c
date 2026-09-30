@@ -16,6 +16,12 @@ void Init_ePWM_MotorControl(void)
 
     // Halt time-base clocks before configuration
     SysCtrlRegs.PCLKCR0.bit.TBCLKSYNC = 0;
+    SysCtrlRegs.PCLKCR1.bit.EPWM1ENCLK = 1;
+    SysCtrlRegs.PCLKCR1.bit.EPWM2ENCLK = 1;
+    SysCtrlRegs.PCLKCR1.bit.EPWM3ENCLK = 1;
+    SysCtrlRegs.PCLKCR1.bit.EPWM6ENCLK = 1;
+    GpioCtrlRegs.GPAMUX1.bit.GPIO11 = 1;
+    GpioCtrlRegs.GPAPUD.bit.GPIO11 = 1;
 
     // -----------------------------------------------------
     // MASTER: ePWM 1
@@ -46,10 +52,17 @@ void Init_ePWM_MotorControl(void)
     EPwm1Regs.TZCTL.bit.TZA = 2;    // Force LOW on trip
     EPwm1Regs.TZCTL.bit.TZB = 2;    // Force LOW on trip
 
-    // ADC Trigger (SOCA) at TBCTR = 0
+  // ADC Trigger (SOCA) at TBCTR = TBPRD
     EPwm1Regs.ETSEL.bit.SOCAEN = 1;     //actually enables Start of Conversion for A
-    EPwm1Regs.ETSEL.bit.SOCASEL = 2;    //SOCA pulse is generated when TBCTR = TBPRD (3125) i.e middle of the centre-aligned pwm pulse
+    EPwm1Regs.ETSEL.bit.SOCASEL = 1;    //SOCA pulse is generated when TBCTR = 0 i.e middle of the centre-aligned pwm pulse
     EPwm1Regs.ETPS.bit.SOCAPRD = 1;    //generates SOCA pulse on first event. Does not wait for more than one
+
+ /* // ADC Trigger (SOCA) at TBCTR = TBPRD
+    EPwm1Regs.ETSEL.bit.SOCBEN = 1;     //actually enables Start of Conversion for A
+    EPwm1Regs.ETSEL.bit.SOCBSEL = 2;    //SOCA pulse is generated when TBCTR = TBPRD (3125) i.e middle of the centre-aligned pwm pulse
+    EPwm1Regs.ETPS.bit.SOCBPRD = 1;    //generates SOCA pulse on first event. Does not wait for more than one */
+
+
 
     // -----------------------------------------------------
     // SLAVE: ePWM 2
@@ -104,8 +117,46 @@ void Init_ePWM_MotorControl(void)
     EPwm3Regs.TZCTL.bit.TZA = 2;
     EPwm3Regs.TZCTL.bit.TZB = 2;
 
+
+    /* ============================================================
+     * ePWM6B - ADC SOCA timing debug output on GPIO11
+     *
+     * ePWM1 SOCA occurs at TBCTR = TBPRD.
+     * ePWM6 is synchronized to ePWM1 and uses the same TBPRD.
+     * EPWM6B changes state at TBCTR = TBPRD.
+     * ============================================================ */
+
+    EPwm6Regs.TBPRD = 3125;
+
+    EPwm6Regs.TBPHS.half.TBPHS = 0;
+    EPwm6Regs.TBCTR = 0;
+
+    EPwm6Regs.TBCTL.bit.CTRMODE = 2;       // Up-down count
+    EPwm6Regs.TBCTL.bit.PHSEN = 0;
+    EPwm6Regs.TBCTL.bit.SYNCOSEL = 0;
+
+    EPwm6Regs.TBCTL.bit.HSPCLKDIV = 0;
+    EPwm6Regs.TBCTL.bit.CLKDIV = 0;
+
+    /*
+     * Generate a debug square wave:
+     *
+     * TBCTR = 0       -> EPWM6B LOW
+     * TBCTR = TBPRD   -> EPWM6B HIGH
+     *
+     * Therefore the rising edge of GPIO11 occurs at
+     * exactly the TBCTR = TBPRD event.
+     */
+    EPwm6Regs.AQCTLB.bit.ZRO = 2;          // Clear at zero
+    EPwm6Regs.AQCTLB.bit.PRD = 1;          // Set at period
+
+    /* No deadband needed for a debug signal */
+    EPwm6Regs.DBCTL.bit.OUT_MODE = 0;
+
     // Restart time-base clocks perfectly in sync
     SysCtrlRegs.PCLKCR0.bit.TBCLKSYNC = 1;
+
+
 
     EDIS;
 }

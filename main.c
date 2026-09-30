@@ -6,51 +6,68 @@
 #include "FOC.h"
 
 volatile Uint16 Motor_Enable = 0;
-volatile Uint32 Main_Loop_Counter = 0;
-
 
 extern __interrupt void adc_isr(void);
 
 void main(void)
 {
     InitSysCtrl();
+
     DINT;
+
     InitPieCtrl();
+
     IER = 0x0000;
     IFR = 0x0000;
+
     InitPieVectTable();
 
-    // Link the ADC interrupt to your ISR
+    // Link ADC interrupt to ISR
     EALLOW;
     PieVectTable.ADCINT = &adc_isr;
     EDIS;
 
-
-
-    // Initialize all hardware modules
+    // GPIO
     InitGpio();
-    Init_ADC_Trigger_Marker(); //creates marker that enables every time adc triggers
 
+    // ADC trigger/ISR debug marker
+    Init_ADC_Trigger_Marker();
 
+    // ADC
     InitAdc();
     Init_ADC_CurrentSensors();
-    Calibrate_ADC_Offsets(); // Motor MUST be off here!
 
+    // Motor MUST be off during calibration
+    Calibrate_ADC_Offsets();
+
+    // Resolver
     Init_SPI_RDC();
     AD2S1210_Configure();
+
     DELAY_US(25000);
+
     AD2S1210_Clear_Startup_Faults();
 
+    // PWM
     Init_ePWM_MotorControl();
 
-    Motor_Enable = 1;
-    // Enable Interrupts
+    // Force PWM outputs into safe state
+    PWM_ForceTripZone();
+
+    // Initialize FOC startup state
+    FOC_ResetStartup();
+
+    // Keep motor disabled for initial testing
+    Motor_Enable = 0;
+
+    // Enable ADC interrupt
     PieCtrlRegs.PIEIER1.bit.INTx6 = 1;
     IER |= M_INT1;
+
     EINT;
     ERTM;
 
-    // Background Safety Loop
+    // Background safety loop
     while(1)
     {
         if(Motor_Enable == 0)

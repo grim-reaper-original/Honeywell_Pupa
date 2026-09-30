@@ -91,7 +91,6 @@ __interrupt void adc_isr(void)
     Read_Resolver_Data();
 
     FOC_OpenLoopStep();
-
     GpioDataRegs.GPACLEAR.bit.GPIO10 = 1;
 
     AdcRegs.ADCST.bit.INT_SEQ1_CLR = 1;
