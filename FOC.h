@@ -4,6 +4,9 @@
 #include "DSP2833x_Device.h"
 #include "DSP2833x_Examples.h"
 
+extern volatile float Target_RPM;
+extern volatile float Measured_RPM;
+
 extern volatile float VDC;
 
 extern volatile float Id;

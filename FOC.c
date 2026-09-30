@@ -11,7 +11,7 @@ volatile float VDC = 28.0f;
 volatile float Id = 0.0f;
 volatile float Iq = 0.0f;
 volatile float Vd = 0.0f;
-volatile float Vq = 3.0f;
+volatile float Vq = 0.0f;
 
 volatile float V_alpha = 0.0f;
 volatile float V_beta = 0.0f;
@@ -61,13 +61,17 @@ volatile Uint32 FOC_Startup_Count = 0;
 #define FOC_STATE_RAMP      1
 
 // Initial alignment
-#define ALIGN_TIME          5.0f
+#define ALIGN_TIME          2.0f
 #define ALIGN_VOLTAGE       2.0f
 
-// Open-loop rotation
-#define OPENLOOP_VQ         3.0f
-#define OPENLOOP_OMEGA      50.0f
-#define OPENLOOP_ACCEL      20.0f
+// Open-loop V/f parameters
+volatile float Target_RPM = 2000.0f;       // Set your desired open-loop speed here
+volatile float Measured_RPM = 0.0f;        // Measured speed in RPM (watch this in CCS)
+volatile float theta_res_prev = 0.0f;      // Previous angle for velocity math
+
+#define OPENLOOP_ACCEL_RPM  500.0f         // Acceleration rate (RPM/second)
+#define VOLTS_PER_RPM       0.001575f        // V/f scalar to overcome Back-EMF
+#define MIN_VQ_VOLTS         2.0f           // Minimum voltage at zero speed
 
 
 
@@ -216,44 +220,66 @@ void FOC_AlignmentStep(void)
 
 void FOC_OpenLoopRampStep(void)
 {
-    /*
-     * Gradually increase electrical angular speed.
-     */
-    omega_cmd += OPENLOOP_ACCEL * FOC_TS;
+    // 1. Convert Target_RPM to electrical rad/s (for 1 Pole Pair)
+    float target_omega = Target_RPM * 0.104719755f;
 
-    /*
-     * Limit the commanded speed.
-     */
-    if (omega_cmd > OPENLOOP_OMEGA)
-        omega_cmd = OPENLOOP_OMEGA;
+    // 2. Gradually ramp omega_cmd up to target_omega
+    if (omega_cmd < target_omega)
+    {
+        omega_cmd += (OPENLOOP_ACCEL_RPM * 0.104719755f) * FOC_TS;
+        if (omega_cmd > target_omega) omega_cmd = target_omega;
+    }
+    else if (omega_cmd > target_omega)
+    {
+        omega_cmd -= (OPENLOOP_ACCEL_RPM * 0.104719755f) * FOC_TS;
+        if (omega_cmd < target_omega) omega_cmd = target_omega;
+    }
 
-    /*
-     * Advance the commanded electrical angle.
-     *
-     * theta_cmd[k+1] = theta_cmd[k] + omega_cmd * Ts
-     */
+    // 3. Advance commanded electrical angle
     theta_cmd += omega_cmd * FOC_TS;
 
-    /*
-     * Wrap theta_cmd to 0 ... 2*pi.
-     */
-    if (theta_cmd >= 6.283185307f)
-        theta_cmd -= 6.283185307f;
+    // 4. Wrap theta_cmd to 0 ... 2*pi
+    if (theta_cmd >= 6.283185307f) theta_cmd -= 6.283185307f;
+    if (theta_cmd < 0.0f)          theta_cmd += 6.283185307f;
 
-    if (theta_cmd < 0.0f)
-        theta_cmd += 6.283185307f;
-
-    /*
-     * Open-loop voltage command.
-     */
+    // 5. V/f Control: Automatically scale Vq with speed to overcome Back-EMF
+    float current_commanded_rpm = omega_cmd * 9.54929658f;
     Vd = 0.0f;
-    Vq = OPENLOOP_VQ;
+    Vq = current_commanded_rpm * VOLTS_PER_RPM;
+
+    // Maintain minimum holding voltage at low speed
+    if (Vq < MIN_VQ_VOLTS)
+    {
+        Vq = MIN_VQ_VOLTS;
+    }
+
+    // Clamp Vq to safe maximum duty limit
+    if (Vq > (VDC * 0.577f))
+    {
+        Vq = VDC * 0.577f;
+    }
 }
 
 void FOC_UpdateResolverAngle(void)
 {
     theta_res = RDC_GetElectricalAngle();
     theta_e = theta_res;
+
+    // --- Calculate Actual Velocity in RPM ---
+    float delta_res = theta_res - theta_res_prev;
+
+    // Handle 0 to 2*PI boundary wrapping
+    if (delta_res < -3.141592654f) delta_res += 6.283185307f;
+    if (delta_res >  3.141592654f) delta_res -= 6.283185307f;
+
+    // Raw RPM calculation (20 kHz ISR -> FOC_TS = 50us)
+    float raw_rpm = (delta_res / FOC_TS) * 9.54929658f;
+
+    // 100 Hz Low-Pass Filter (Prevents jittery numbers in CCS Expressions window)
+    Measured_RPM = (Measured_RPM * 0.95f) + (raw_rpm * 0.05f);
+
+    // Save previous angle
+    theta_res_prev = theta_res;
 }
 
 
@@ -272,7 +298,6 @@ void FOC_UpdateAngleError(void)
 void FOC_ResetStartup(void)
 {
     theta_cmd = 0.0f;
-    theta_res = 0.0f;
     theta_error = 0.0f;
 
     omega_cmd = 0.0f;
