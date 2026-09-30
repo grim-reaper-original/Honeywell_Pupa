@@ -16,9 +16,9 @@
 #define RDC_SAMPLE_HIGH() (GpioDataRegs.GPASET.bit.GPIO23 = 1)
 
 
-
+volatile Uint16 theta_mechh = 0;
 volatile Uint16 Motor_PolePairs = 2;
-volatile float Angle_Offset = 0.0f;
+volatile float Angle_Offset = 72.158203124;
 
 Uint16 Rotor_Angle_Raw = 0;
 int16  Rotor_Velocity_Raw = 0;
@@ -235,15 +235,9 @@ void Read_Resolver_Data(void)
 
 float RDC_GetMechanicalAngle(void)
 {
+    theta_mechh = ((float)Rotor_Angle_12 * 2.0f * PI) / 4096.0f;
     return ((float)Rotor_Angle_12 * 2.0f * PI) / 4096.0f;
 }
-
-float RDC_GetElectricalAngle(void)
-{
-    float theta_mech;
-    float theta_elec;
-
-    theta_mech = RDC_GetMechanicalAngle();
 
     theta_elec = theta_mech * Motor_PolePairs + Angle_Offset;
 

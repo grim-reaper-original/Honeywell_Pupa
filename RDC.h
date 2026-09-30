@@ -8,6 +8,7 @@
 // Public RDC data
 // =========================================================
 
+extern volatile Uint16 theta_mechh;
 extern Uint16 Rotor_Angle_Raw;
 extern int16  Rotor_Velocity_Raw;
 extern Uint16 Resolver_Fault_Register;

@@ -62,7 +62,7 @@ volatile Uint32 FOC_Startup_Count = 0;
 
 // Initial alignment
 #define ALIGN_TIME          2.0f
-#define ALIGN_VOLTAGE       2.0f
+#define ALIGN_VOLTAGE       1.0f
 
 // Open-loop V/f parameters
 volatile float Target_RPM = 1500.0f;       // Set your desired open-loop speed here
@@ -71,7 +71,7 @@ volatile float theta_res_prev = 0.0f;      // Previous angle for velocity math
 
 #define OPENLOOP_ACCEL_RPM  500.0f         // Acceleration rate (RPM/second)
 #define VOLTS_PER_RPM       0.001575f        // V/f scalar to overcome Back-EMF
-#define MIN_VQ_VOLTS         2.0f           // Minimum voltage at zero speed
+#define MIN_VQ_VOLTS         1.0f           // Minimum voltage at zero speed
 
 
 
@@ -221,7 +221,7 @@ void FOC_AlignmentStep(void)
 void FOC_OpenLoopRampStep(void)
 {
     // 1. Convert Target_RPM to electrical rad/s (for 1 Pole Pair)
-    float target_omega = Target_RPM * 0.104719755f;
+    float target_omega = Target_RPM * 0.104719755f * (float)Motor_PolePairs;
 
     // 2. Gradually ramp omega_cmd up to target_omega
     if (omega_cmd < target_omega)

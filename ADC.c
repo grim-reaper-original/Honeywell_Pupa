@@ -8,6 +8,7 @@ volatile Uint32 isr_counter = 0;
 
 Uint16 Raw_Current_A = 0;
 Uint16 Raw_Current_B = 0;
+Uint16 test_ADC = 0;
 
 float Offset_Current_A = 2048.0f;
 float Offset_Current_B = 2048.0f;
@@ -65,11 +66,13 @@ void Calibrate_ADC_Offsets(void)
     Offset_Current_A = (float)Sum_A / 1000.0f;
     Offset_Current_B = (float)Sum_B / 1000.0f;
 
-    // Phase C is no longer needed since we calculate it mathematically!
+
 }
 
 void Read_ADC_Currents(void)
 {
+
+    test_ADC = AdcRegs.ADCRESULT6 >> 4;
     Raw_Current_A = AdcRegs.ADCRESULT0 >> 4;
     Raw_Current_B = AdcRegs.ADCRESULT1 >> 4;
 
