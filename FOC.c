@@ -65,7 +65,7 @@ volatile Uint32 FOC_Startup_Count = 0;
 #define ALIGN_VOLTAGE       2.0f
 
 // Open-loop V/f parameters
-volatile float Target_RPM = 2000.0f;       // Set your desired open-loop speed here
+volatile float Target_RPM = 1500.0f;       // Set your desired open-loop speed here
 volatile float Measured_RPM = 0.0f;        // Measured speed in RPM (watch this in CCS)
 volatile float theta_res_prev = 0.0f;      // Previous angle for velocity math
 
@@ -273,7 +273,7 @@ void FOC_UpdateResolverAngle(void)
     if (delta_res >  3.141592654f) delta_res -= 6.283185307f;
 
     // Raw RPM calculation (20 kHz ISR -> FOC_TS = 50us)
-    float raw_rpm = (delta_res / FOC_TS) * 9.54929658f;
+    float raw_rpm = (delta_res / FOC_TS) * (9.54929658f / Motor_PolePairs);
 
     // 100 Hz Low-Pass Filter (Prevents jittery numbers in CCS Expressions window)
     Measured_RPM = (Measured_RPM * 0.95f) + (raw_rpm * 0.05f);

@@ -46,8 +46,8 @@ void Init_ePWM_MotorControl(void)
 
     EPwm1Regs.DBCTL.bit.OUT_MODE = 3;   //full dead band generation (delay enabled for both rising and falling edge for A and B respectively)
     EPwm1Regs.DBCTL.bit.POLSEL = 2; // Active High Complementary (PWM1 - Active High. PWM2 - Active low for complementary A and B High and Low)
-    EPwm1Regs.DBRED = 150;          // 1.2us Deadband
-    EPwm1Regs.DBFED = 150;
+    EPwm1Regs.DBRED = 45;          // 1.2us Deadband
+    EPwm1Regs.DBFED = 45;
 
     EPwm1Regs.TZCTL.bit.TZA = 2;    // Force LOW on trip
     EPwm1Regs.TZCTL.bit.TZB = 2;    // Force LOW on trip
@@ -57,7 +57,7 @@ void Init_ePWM_MotorControl(void)
     EPwm1Regs.ETSEL.bit.SOCASEL = 1;    //SOCA pulse is generated when TBCTR = 0 i.e middle of the centre-aligned pwm pulse
     EPwm1Regs.ETPS.bit.SOCAPRD = 1;    //generates SOCA pulse on first event. Does not wait for more than one
 
- /* // ADC Trigger (SOCA) at TBCTR = TBPRD
+ /* // ADC Trigger (SOCB) at TBCTR = TBPRD
     EPwm1Regs.ETSEL.bit.SOCBEN = 1;     //actually enables Start of Conversion for A
     EPwm1Regs.ETSEL.bit.SOCBSEL = 2;    //SOCA pulse is generated when TBCTR = TBPRD (3125) i.e middle of the centre-aligned pwm pulse
     EPwm1Regs.ETPS.bit.SOCBPRD = 1;    //generates SOCA pulse on first event. Does not wait for more than one */
@@ -85,8 +85,8 @@ void Init_ePWM_MotorControl(void)
 
     EPwm2Regs.DBCTL.bit.OUT_MODE = 3;
     EPwm2Regs.DBCTL.bit.POLSEL = 2;
-    EPwm2Regs.DBRED = 150;
-    EPwm2Regs.DBFED = 150;
+    EPwm2Regs.DBRED = 45;
+    EPwm2Regs.DBFED = 45;
 
     EPwm2Regs.TZCTL.bit.TZA = 2;
     EPwm2Regs.TZCTL.bit.TZB = 2;
@@ -111,8 +111,8 @@ void Init_ePWM_MotorControl(void)
 
     EPwm3Regs.DBCTL.bit.OUT_MODE = 3;
     EPwm3Regs.DBCTL.bit.POLSEL = 2;
-    EPwm3Regs.DBRED = 150;
-    EPwm3Regs.DBFED = 150;
+    EPwm3Regs.DBRED = 45;
+    EPwm3Regs.DBFED = 45;
 
     EPwm3Regs.TZCTL.bit.TZA = 2;
     EPwm3Regs.TZCTL.bit.TZB = 2;
