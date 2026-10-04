@@ -13,25 +13,20 @@
 #define MIN_DC_BUS_V        18.5f
 #define NOMINAL_DC_BUS_V    28.0f
 
-// Startup states
-#define FOC_STATE_ALIGN     0
-#define FOC_STATE_RAMP      1
 
-// Initial alignment
-#define ALIGN_TIME          2.0f
-#define ALIGN_VOLTAGE       1.0f
+//current control constants
+#define CURRENT_LIMIT_A      5.0f
+#define CURRENT_TRIP_A       8.0f
+
+#define CURRENT_PI_KP        1.3509f
+#define CURRENT_PI_KI        1482.83f
+
 
 // 20 kHz control loop
 #define FOC_TS              0.00005f
 
-// Open-loop V/f parameters
-volatile float Target_RPM = 1500.0f;       // Set your desired open-loop speed here
-volatile float Ramped_Target_RPM = 0.0f;
-volatile float Measured_RPM = 0.0f;        // Measured speed in RPM (watch this in CCS)
-volatile float theta_res_prev = 0.0f;      // Previous angle for velocity math
 
-#define OPENLOOP_ACCEL_RPM  500.0f         // Acceleration rate (RPM/second)
-#define VOLTS_PER_RPM       0.001575f        // V/f scalar to overcome Back-EMF
+
 
 // Calibration Constants
 #define CAL_ALIGN_VOLTAGE       0.50f
@@ -81,8 +76,18 @@ volatile Uint16 CMPA_c = 1562;
 
 volatile float theta_e = 0.0f;
 
+//current references
+volatile float Id_ref = 0.0f;
+volatile float Iq_ref = 0.0f;
+
+
+//integrators
+static float Id_integrator = 0.0f;
+static float Iq_integrator = 0.0f;
+
+
 // =========================================================
-//  startup variables
+// Resolver feedback variables
 // =========================================================
 volatile float theta_res = 0.0f;       // Actual rotor electrical angle
 volatile float theta_cmd = 0.0f;       // Commanded stator electrical angle
@@ -93,10 +98,6 @@ volatile float omega_e = 0.0f;
 volatile float Measured_RPM = 0.0f;
 volatile float Measured_Electrical_RPM = 0.0f;
 
-volatile float omega_cmd = 0.0f;       // Commanded electrical angular speed
-
-volatile Uint16 FOC_Startup_State = 0;
-volatile Uint32 FOC_Startup_Count = 0;
 
 static Uint16 Cal_State = 0;
 static Uint32 Cal_Count = 0;
@@ -130,15 +131,15 @@ static float clampf_local(float x, float lo, float hi)
 
 static float wrap_angle(float x)
 {
-    while (x >= TWO_PI_F) x -= TWO_PI_F;
-    while (x < 0.0f) x += TWO_PI_F;
+    while (x >= TWO_PI) x -= TWO_PI;
+    while (x < 0.0f) x += TWO_PI;
     return x;
 }
 
 static float wrap_angle_signed(float x)
 {
-    while (x > PI_F) x -= TWO_PI_F;
-    while (x < -PI_F) x += TWO_PI_F;
+    while (x > PI) x -= TWO_PI;
+    while (x < -PI) x += TWO_PI;
     return x;
 }
 
@@ -155,8 +156,8 @@ void Clarke_Transform(void)
 
 void Park_Transform(void)
 {
-    float s = sinf(theta_res);
-    float c = cosf(theta_res);
+    float sin_theta = sinf(theta_res);
+    float cos_theta = cosf(theta_res);
 
     Id = I_alpha * cos_theta
        + I_beta * sin_theta;
@@ -170,7 +171,7 @@ void Inverse_Park(void)
     float sin_theta;
     float cos_theta;
 
-    // Use commanded electrical angle for open-loop voltage vector
+    // Use measured rotor electrical angle
     sin_theta = sinf(theta_res);
     cos_theta = cosf(theta_res);
 
@@ -234,40 +235,27 @@ void Duty_to_CMPA(void)
 
 }
 
-void FOC_AlignmentStep(void)
+static float AvailableVoltage(void)
 {
-    /*
-     * Hold the commanded stator field at a fixed electrical angle.
-     *
-     * theta_cmd = 0 rad
-     * Vd = ALIGN_VOLTAGE
-     * Vq = 0
-     */
+    float vmax = VDC * 0.577350269f;
 
-    theta_cmd = 0.0f;
+    if (vmax < 0.0f)
+        vmax = 0.0f;
 
-    Vd = ALIGN_VOLTAGE;
-    Vq = 0.0f;
+    return vmax;
+}
 
-    FOC_Startup_Count++;
+static void LimitVoltageVector(void)
+{
+    float vmax = AvailableVoltage();
+    float mag = sqrtf(Vd * Vd + Vq * Vq);
 
-    /*
-     * 20 kHz loop:
-     *
-     * 5.0 s × 20000 = 100000 cycles
-     */
-    if (FOC_Startup_Count >=
-        (Uint32)(ALIGN_TIME / FOC_TS))
+    if (mag > vmax && mag > 0.001f)
     {
-        FOC_Startup_Count = 0;
+        float scale = vmax / mag;
 
-        // Start the open-loop ramp from zero speed
-        omega_cmd = 0.0f;
-
-        // Start commanded angle from the alignment angle
-        theta_cmd = 0.0f;
-
-        FOC_Startup_State = FOC_STATE_RAMP;
+        Vd *= scale;
+        Vq *= scale;
     }
 }
 
@@ -351,7 +339,7 @@ static void FOC_AngleCalibrationStep(void)
                 atan2f(Cal_SinSum, Cal_CosSum);
 
             if (mean_angle < 0.0f)
-                mean_angle += TWO_PI_F;
+                mean_angle += TWO_PI;
 
             offset = wrap_angle(-mean_angle);
 
@@ -375,49 +363,52 @@ static void FOC_AngleCalibrationStep(void)
     }
 }
 
-
-
-void FOC_OpenLoopRampStep(void)
+static float CurrentPI_Update(
+    float error,
+    float *integrator,
+    float kp,
+    float ki,
+    float output_limit)
 {
-    // 1. Convert Target_RPM to electrical rad/s (for 1 Pole Pair)
-    float target_omega = Target_RPM * 0.104719755f * (float)Motor_PolePairs;
+    float proportional = kp * error;
+    float output;
 
-    // 2. Gradually ramp omega_cmd up to target_omega
-    if (omega_cmd < target_omega)
+    output = proportional + *integrator;
+
+    if (output < output_limit &&
+        output > -output_limit)
     {
-        omega_cmd += (OPENLOOP_ACCEL_RPM * 0.104719755f) * FOC_TS;
-        if (omega_cmd > target_omega) omega_cmd = target_omega;
+        *integrator +=
+            ki * error * FOC_TS;
     }
-    else if (omega_cmd > target_omega)
+    else if (output >= output_limit &&
+             error < 0.0f)
     {
-        omega_cmd -= (OPENLOOP_ACCEL_RPM * 0.104719755f) * FOC_TS;
-        if (omega_cmd < target_omega) omega_cmd = target_omega;
+        *integrator +=
+            ki * error * FOC_TS;
     }
-
-    // 3. Advance commanded electrical angle
-    theta_cmd += omega_cmd * FOC_TS;
-
-    // 4. Wrap theta_cmd to 0 ... 2*pi
-    if (theta_cmd >= 6.283185307f) theta_cmd -= 6.283185307f;
-    if (theta_cmd < 0.0f)          theta_cmd += 6.283185307f;
-
-    // 5. V/f Control: Automatically scale Vq with speed to overcome Back-EMF
-    float current_commanded_rpm = omega_cmd * 9.54929658f;
-    Vd = 0.0f;
-    Vq = current_commanded_rpm * VOLTS_PER_RPM;
-
-    // Maintain minimum holding voltage at low speed
-    if (Vq < MIN_VQ_VOLTS)
+    else if (output <= -output_limit &&
+             error > 0.0f)
     {
-        Vq = MIN_VQ_VOLTS;
+        *integrator +=
+            ki * error * FOC_TS;
     }
 
-    // Clamp Vq to safe maximum duty limit
-    if (Vq > (VDC * 0.577f))
-    {
-        Vq = VDC * 0.577f;
-    }
+    *integrator = clampf_local(
+        *integrator,
+        -output_limit,
+        output_limit);
+
+    output = proportional + *integrator;
+
+    return clampf_local(
+        output,
+        -output_limit,
+        output_limit);
 }
+
+
+
 
 void FOC_UpdateResolverAngle(void)
 {
@@ -438,76 +429,98 @@ void FOC_UpdateResolverAngle(void)
 }
 
 
-void FOC_UpdateAngleError(void)
-{
-    theta_error =
-        wrap_angle_signed(theta_cmd - theta_res);
-}
-
 
 void FOC_ResetStartup(void)
 {
     theta_cmd = 0.0f;
     theta_error = 0.0f;
 
-    omega_cmd = 0.0f;
-
-    FOC_Startup_State = FOC_STATE_ALIGN;
-    FOC_Startup_Count = 0;
-
     Vd = 0.0f;
     Vq = 0.0f;
+
+    Id_ref = 0.0f;
+    Iq_ref = 0.0f;
+
+    Id_integrator = 0.0f;
+    Iq_integrator = 0.0f;
 }
 
 
 void FOC_OpenLoopStep(void)
 {
     /*
-     * Always update resolver angle so that resolver
-     * operation can be tested while the motor is disabled.
+     * Always update resolver angle.
      */
     FOC_UpdateResolverAngle();
 
     /*
-     * Keep startup state reset while motor is disabled.
-     * Do not generate/update motor-control PWM commands.
+     * Keep controller inactive while motor is disabled.
      */
     if (Motor_Enable == 0)
     {
-        FOC_ResetStartup();
+        Vd = 0.0f;
+        Vq = 0.0f;
+
+        Id_ref = 0.0f;
+        Iq_ref = 0.0f;
+
+        Id_integrator = 0.0f;
+        Iq_integrator = 0.0f;
+
         return;
     }
 
     /*
-     * Measure currents and transform them.
+     * Measure phase currents and transform them
+     * into the rotating d-q reference frame.
      */
     Clarke_Transform();
     Park_Transform();
 
     /*
-     * Startup state machine.
+     * Fixed current references for Commit 3.
+     *
+     * Id = 0 A
+     * Iq = 1 A
      */
-    if (FOC_Startup_State == FOC_STATE_ALIGN)
+    Id_ref = 0.0f;
+    Iq_ref = 1.0f;
+
+    /*
+     * Current PI controllers.
+     *
+     * Convert current errors into d-q voltage commands.
+     */
     {
-        FOC_AlignmentStep();
-    }
-    else if (FOC_Startup_State == FOC_STATE_RAMP)
-    {
-        FOC_OpenLoopRampStep();
+        float voltage_limit = AvailableVoltage();
+
+        Vd = CurrentPI_Update(
+            Id_ref - Id,
+            &Id_integrator,
+            CURRENT_PI_KP,
+            CURRENT_PI_KI,
+            voltage_limit);
+
+        Vq = CurrentPI_Update(
+            Iq_ref - Iq,
+            &Iq_integrator,
+            CURRENT_PI_KP,
+            CURRENT_PI_KI,
+            voltage_limit);
     }
 
     /*
-     * Compare commanded field angle with actual rotor angle.
+     * Limit total d-q voltage vector.
      */
-    FOC_UpdateAngleError();
+    LimitVoltageVector();
 
     /*
-     * Convert commanded dq voltage into alpha-beta voltage.
+     * d-q -> alpha-beta
      */
     Inverse_Park();
 
     /*
-     * alpha-beta -> three phase
+     * alpha-beta -> three-phase
      */
     Inverse_Clarke();
 
@@ -517,17 +530,17 @@ void FOC_OpenLoopStep(void)
     Zero_Sequence_Modulation();
 
     /*
-     * Voltage -> duty
+     * Phase voltage -> duty ratio
      */
     Modulation_to_Duty();
 
     /*
-     * Duty -> PWM compare values
+     * Duty ratio -> PWM compare values
      */
     Duty_to_CMPA();
 
     /*
-     * Update ePWM1/2/3
+     * Update ePWM1/2/3.
      */
     PWM_UpdateDuty(CMPA_a, CMPA_b, CMPA_c);
 }
