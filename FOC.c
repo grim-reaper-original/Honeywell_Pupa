@@ -21,6 +21,12 @@
 #define CURRENT_PI_KP        1.3509f
 #define CURRENT_PI_KI        1482.83f
 
+// Speed control constants
+#define TARGET_RPM              1500.0f    //desired mechanical rotor speed.
+#define SPEED_LOOP_DIVIDER     20U         //speed PI executes every 1kHz
+#define SPEED_PI_KP            0.0020f
+#define SPEED_PI_KI            0.0200f
+
 
 // 20 kHz control loop
 #define FOC_TS              0.00005f
@@ -84,6 +90,12 @@ volatile float Iq_ref = 0.0f;
 //integrators
 static float Id_integrator = 0.0f;
 static float Iq_integrator = 0.0f;
+
+// Speed controller
+volatile float Target_RPM = TARGET_RPM;
+static float Speed_integrator = 0.0f;
+static Uint16 Speed_Loop_Count = 0;
+
 
 
 // =========================================================
@@ -407,6 +419,49 @@ static float CurrentPI_Update(
         output_limit);
 }
 
+static float SpeedPI_Update(
+    float speed_error)
+{
+    float proportional;
+    float output;
+
+    proportional = SPEED_PI_KP * speed_error;
+
+    output = proportional + Speed_integrator;
+
+    if (output < CURRENT_LIMIT_A &&
+        output > -CURRENT_LIMIT_A)
+    {
+        Speed_integrator +=
+            SPEED_PI_KI * speed_error * (FOC_TS * SPEED_LOOP_DIVIDER);
+    }
+    else if (output >= CURRENT_LIMIT_A &&
+             speed_error < 0.0f)
+    {
+        Speed_integrator +=
+            SPEED_PI_KI * speed_error * (FOC_TS * SPEED_LOOP_DIVIDER);
+    }
+    else if (output <= -CURRENT_LIMIT_A &&
+             speed_error > 0.0f)
+    {
+        Speed_integrator +=
+            SPEED_PI_KI * speed_error * (FOC_TS * SPEED_LOOP_DIVIDER);
+    }
+
+    Speed_integrator = clampf_local(
+        Speed_integrator,
+        -CURRENT_LIMIT_A,
+        CURRENT_LIMIT_A);
+
+    output = proportional + Speed_integrator;
+
+    return clampf_local(
+        output,
+        -CURRENT_LIMIT_A,
+        CURRENT_LIMIT_A);
+}
+
+
 
 
 
@@ -443,6 +498,9 @@ void FOC_ResetStartup(void)
 
     Id_integrator = 0.0f;
     Iq_integrator = 0.0f;
+
+    Speed_integrator = 0.0f;
+    Speed_Loop_Count = 0;
 }
 
 
@@ -457,18 +515,21 @@ void FOC_OpenLoopStep(void)
      * Keep controller inactive while motor is disabled.
      */
     if (Motor_Enable == 0)
-    {
-        Vd = 0.0f;
-        Vq = 0.0f;
+        {
+            Vd = 0.0f;
+            Vq = 0.0f;
 
-        Id_ref = 0.0f;
-        Iq_ref = 0.0f;
+            Id_ref = 0.0f;
+            Iq_ref = 0.0f;
 
-        Id_integrator = 0.0f;
-        Iq_integrator = 0.0f;
+            Id_integrator = 0.0f;
+            Iq_integrator = 0.0f;
 
-        return;
-    }
+            Speed_integrator = 0.0f;
+            Speed_Loop_Count = 0;
+
+            return;
+        }
 
     /*
      * Measure phase currents and transform them
@@ -478,13 +539,26 @@ void FOC_OpenLoopStep(void)
     Park_Transform();
 
     /*
-     * Fixed current references for Commit 3.
-     *
-     * Id = 0 A
-     * Iq = 1 A
-     */
-    Id_ref = 0.0f;
-    Iq_ref = 1.0f;
+         * Outer speed loop.
+         *
+         * Speed PI runs at 1 kHz while the
+         * current loop continues at 20 kHz.
+         */
+    Speed_Loop_Count++;
+
+    if (Speed_Loop_Count >= SPEED_LOOP_DIVIDER)
+        {
+            float speed_error;
+
+            Speed_Loop_Count = 0;
+
+            speed_error =
+                Target_RPM - Measured_RPM;
+
+            Iq_ref = SpeedPI_Update(speed_error);
+        }
+
+        Id_ref = 0.0f;
 
     /*
      * Current PI controllers.
