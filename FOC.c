@@ -4,10 +4,37 @@
 #include "ePWM.h"
 #include <math.h>
 
+//General constants
+#define PI                  3.14159265358979323846f
+#define TWO_PI              6.28318530717958647692f
+
+#define MOTOR_POLE_PAIRS    2.0f
+
+#define MIN_DC_BUS_V        18.5f
+#define NOMINAL_DC_BUS_V    28.0f
+
+// Startup states
+#define FOC_STATE_ALIGN     0
+#define FOC_STATE_RAMP      1
+
+// Initial alignment
+#define ALIGN_TIME          2.0f
+#define ALIGN_VOLTAGE       1.0f
+
+// Open-loop V/f parameters
+volatile float Target_RPM = 1500.0f;       // Set your desired open-loop speed here
+volatile float Ramped_Target_RPM = 0.0f;
+volatile float Measured_RPM = 0.0f;        // Measured speed in RPM (watch this in CCS)
+volatile float theta_res_prev = 0.0f;      // Previous angle for velocity math
+
+#define OPENLOOP_ACCEL_RPM  500.0f         // Acceleration rate (RPM/second)
+#define VOLTS_PER_RPM       0.001575f        // V/f scalar to overcome Back-EMF
+
+
+
 extern volatile Uint16 Motor_Enable;
 
-volatile float VDC = 28.0f;
-
+volatile float VDC = NOMINAL_DC_BUS_V;
 volatile float Id = 0.0f;
 volatile float Iq = 0.0f;
 volatile float Vd = 0.0f;
@@ -35,9 +62,9 @@ volatile float Duty_A=0.0f;
 volatile float Duty_B=0.0f;
 volatile float Duty_C=0.0f;
 
-volatile Uint16 CMPA_a = 3125;
-volatile Uint16 CMPA_b = 3125;
-volatile Uint16 CMPA_c = 3125;
+volatile Uint16 CMPA_a = 1562;
+volatile Uint16 CMPA_b = 1562;
+volatile Uint16 CMPA_c = 1562;
 
 volatile float theta_e = 0.0f;
 
@@ -56,26 +83,37 @@ volatile Uint32 FOC_Startup_Count = 0;
 // 20 kHz control loop
 #define FOC_TS              0.00005f
 
-// Startup states
-#define FOC_STATE_ALIGN     0
-#define FOC_STATE_RAMP      1
 
-// Initial alignment
-#define ALIGN_TIME          2.0f
-#define ALIGN_VOLTAGE       1.0f
 
-// Open-loop V/f parameters
-volatile float Target_RPM = 1500.0f;       // Set your desired open-loop speed here
-volatile float Measured_RPM = 0.0f;        // Measured speed in RPM (watch this in CCS)
-volatile float theta_res_prev = 0.0f;      // Previous angle for velocity math
-
-#define OPENLOOP_ACCEL_RPM  500.0f         // Acceleration rate (RPM/second)
-#define VOLTS_PER_RPM       0.001575f        // V/f scalar to overcome Back-EMF
-#define MIN_VQ_VOLTS         1.0f           // Minimum voltage at zero speed
 
 
 
 //functions
+
+static float clampf_local(float x, float lo, float hi)
+{
+    if (x > hi) return hi;
+    if (x < lo) return lo;
+    return x;
+}
+
+
+static float wrap_angle(float x)
+{
+    while (x >= TWO_PI_F) x -= TWO_PI_F;
+    while (x < 0.0f) x += TWO_PI_F;
+    return x;
+}
+
+static float wrap_angle_signed(float x)
+{
+    while (x > PI_F) x -= TWO_PI_F;
+    while (x < -PI_F) x += TWO_PI_F;
+    return x;
+}
+
+
+
 void Clarke_Transform(void)
 {
     I_alpha = Current_A;
@@ -87,11 +125,8 @@ void Clarke_Transform(void)
 
 void Park_Transform(void)
 {
-    float sin_theta;
-    float cos_theta;
-
-    sin_theta = sinf(theta_res);
-    cos_theta = cosf(theta_res);
+    float s = sinf(theta_res);
+    float c = cosf(theta_res);
 
     Id = I_alpha * cos_theta
        + I_beta * sin_theta;
@@ -106,8 +141,8 @@ void Inverse_Park(void)
     float cos_theta;
 
     // Use commanded electrical angle for open-loop voltage vector
-    sin_theta = sinf(theta_cmd);
-    cos_theta = cosf(theta_cmd);
+    sin_theta = sinf(theta_res);
+    cos_theta = cosf(theta_res);
 
     V_alpha = Vd * cos_theta
             - Vq * sin_theta;
@@ -156,20 +191,9 @@ void Modulation_to_Duty(void)
     Duty_B = 0.5f + (Vb_mod/VDC);
     Duty_C = 0.5f + (Vc_mod/VDC);
 
-    if (Duty_A > 1.0f)
-        Duty_A = 1.0f;
-    if (Duty_A < 0.0f)
-        Duty_A = 0.0f;
-
-    if (Duty_B > 1.0f)
-        Duty_B = 1.0f;
-    if (Duty_B < 0.0f)
-        Duty_B = 0.0f;
-
-    if (Duty_C > 1.0f)
-        Duty_C = 1.0f;
-    if (Duty_C < 0.0f)
-        Duty_C = 0.0f;
+    Duty_A = clampf_local(Duty_A, 0.02f, 0.98f);
+    Duty_B = clampf_local(Duty_B, 0.02f, 0.98f);
+    Duty_C = clampf_local(Duty_C, 0.02f, 0.98f);
 }
 
 void Duty_to_CMPA(void)
