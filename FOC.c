@@ -21,6 +21,9 @@
 #define ALIGN_TIME          2.0f
 #define ALIGN_VOLTAGE       1.0f
 
+// 20 kHz control loop
+#define FOC_TS              0.00005f
+
 // Open-loop V/f parameters
 volatile float Target_RPM = 1500.0f;       // Set your desired open-loop speed here
 volatile float Ramped_Target_RPM = 0.0f;
@@ -29,6 +32,16 @@ volatile float theta_res_prev = 0.0f;      // Previous angle for velocity math
 
 #define OPENLOOP_ACCEL_RPM  500.0f         // Acceleration rate (RPM/second)
 #define VOLTS_PER_RPM       0.001575f        // V/f scalar to overcome Back-EMF
+
+// Calibration Constants
+#define CAL_ALIGN_VOLTAGE       0.50f
+#define CAL_ALIGN_TIME_S        0.50f
+#define CAL_CAPTURE_SAMPLES     400U
+#define CAL_CURRENT_LIMIT_A     2.0f
+
+#define FOC_MODE_IDLE          0U
+#define FOC_MODE_CALIBRATION  1U
+#define FOC_MODE_CLOSED_LOOP  2U
 
 
 
@@ -69,19 +82,36 @@ volatile Uint16 CMPA_c = 1562;
 volatile float theta_e = 0.0f;
 
 // =========================================================
-// Open-loop startup variables
+//  startup variables
 // =========================================================
 volatile float theta_res = 0.0f;       // Actual rotor electrical angle
 volatile float theta_cmd = 0.0f;       // Commanded stator electrical angle
 volatile float theta_error = 0.0f;     // theta_cmd - theta_res
+volatile float theta_res_prev = 0.0f;
+volatile float omega_e = 0.0f;
+
+volatile float Measured_RPM = 0.0f;
+volatile float Measured_Electrical_RPM = 0.0f;
 
 volatile float omega_cmd = 0.0f;       // Commanded electrical angular speed
 
 volatile Uint16 FOC_Startup_State = 0;
 volatile Uint32 FOC_Startup_Count = 0;
 
-// 20 kHz control loop
-#define FOC_TS              0.00005f
+static Uint16 Cal_State = 0;
+static Uint32 Cal_Count = 0;
+static Uint16 Cal_SampleCount = 0;
+
+static float Cal_SinSum = 0.0f;
+static float Cal_CosSum = 0.0f;
+
+volatile float Cal_Raw_Electrical_Angle = 0.0f;
+volatile float Cal_Calculated_Offset = 0.0f;
+volatile float Cal_Average_Iq = 0.0f;
+
+volatile Uint16 Angle_Calibration_Request = 0;
+
+volatile Uint16 FOC_Mode = FOC_MODE_IDLE;
 
 
 
@@ -242,6 +272,111 @@ void FOC_AlignmentStep(void)
 }
 
 
+static void FOC_AngleCalibrationStep(void)
+{
+    float theta_mech;
+    float theta_elec_raw;
+
+    if (Cal_State == 0)
+    {
+        Cal_Count = 0;
+        Cal_SampleCount = 0;
+
+        Cal_SinSum = 0.0f;
+        Cal_CosSum = 0.0f;
+        Cal_Average_Iq = 0.0f;
+
+        theta_cmd = 0.0f;
+
+        Vd = CAL_ALIGN_VOLTAGE;
+        Vq = 0.0f;
+
+        Cal_State = 1;
+        return;
+    }
+
+    if (Cal_State == 1)
+    {
+        theta_cmd = 0.0f;
+
+        Vd = CAL_ALIGN_VOLTAGE;
+        Vq = 0.0f;
+
+        Cal_Count++;
+
+        if (sqrtf(Id * Id + Iq * Iq) > CAL_CURRENT_LIMIT_A)
+        {
+            Vd = 0.0f;
+            Vq = 0.0f;
+
+            PWM_UpdateDuty(1562, 1562, 1562);
+
+            Cal_State = 0;
+            Angle_Calibration_Request = 0;
+            Motor_Enable = 0;
+
+            return;
+        }
+
+        if (Cal_Count >=
+            (Uint32)(CAL_ALIGN_TIME_S / FOC_TS))
+        {
+            Cal_Count = 0;
+            Cal_State = 2;
+        }
+
+        return;
+    }
+
+    if (Cal_State == 2)
+    {
+        float mean_angle;
+        float offset;
+
+        theta_mech = RDC_GetMechanicalAngle();
+
+        theta_elec_raw =
+            wrap_angle(theta_mech * MOTOR_POLE_PAIRS);
+
+        Cal_SinSum += sinf(theta_elec_raw);
+        Cal_CosSum += cosf(theta_elec_raw);
+
+        Cal_Average_Iq += Iq;
+
+        Cal_SampleCount++;
+
+        if (Cal_SampleCount >= CAL_CAPTURE_SAMPLES)
+        {
+            mean_angle =
+                atan2f(Cal_SinSum, Cal_CosSum);
+
+            if (mean_angle < 0.0f)
+                mean_angle += TWO_PI_F;
+
+            offset = wrap_angle(-mean_angle);
+
+            Cal_Raw_Electrical_Angle = mean_angle;
+            Cal_Calculated_Offset = offset;
+
+            Cal_Average_Iq /=
+                (float)CAL_CAPTURE_SAMPLES;
+
+            Angle_Offset = offset;
+
+            Vd = 0.0f;
+            Vq = 0.0f;
+
+            PWM_UpdateDuty(1562, 1562, 1562);
+
+            Cal_State = 0;
+            Angle_Calibration_Request = 0;
+            Motor_Enable = 0;
+        }
+    }
+}
+
+
+
 void FOC_OpenLoopRampStep(void)
 {
     // 1. Convert Target_RPM to electrical rad/s (for 1 Pole Pair)
@@ -287,35 +422,26 @@ void FOC_OpenLoopRampStep(void)
 void FOC_UpdateResolverAngle(void)
 {
     theta_res = RDC_GetElectricalAngle();
-    theta_e = theta_res;
 
-    // --- Calculate Actual Velocity in RPM ---
-    float delta_res = theta_res - theta_res_prev;
+        omega_e =
+            wrap_angle_signed(theta_res - theta_res_prev)
+            / FOC_TS;
 
-    // Handle 0 to 2*PI boundary wrapping
-    if (delta_res < -3.141592654f) delta_res += 6.283185307f;
-    if (delta_res >  3.141592654f) delta_res -= 6.283185307f;
+        Measured_Electrical_RPM =
+            omega_e * 9.54929658f;
 
-    // Raw RPM calculation (20 kHz ISR -> FOC_TS = 50us)
-    float raw_rpm = (delta_res / FOC_TS) * (9.54929658f / Motor_PolePairs);
+        Measured_RPM =
+            (Measured_RPM * 0.95f) +
+            ((Measured_Electrical_RPM / MOTOR_POLE_PAIRS) * 0.05f);
 
-    // 100 Hz Low-Pass Filter (Prevents jittery numbers in CCS Expressions window)
-    Measured_RPM = (Measured_RPM * 0.95f) + (raw_rpm * 0.05f);
-
-    // Save previous angle
-    theta_res_prev = theta_res;
+        theta_res_prev = theta_res;
 }
 
 
 void FOC_UpdateAngleError(void)
 {
-    theta_error = theta_cmd - theta_res;
-
-    if (theta_error > 3.141592654f)
-        theta_error -= 6.283185307f;
-
-    if (theta_error < -3.141592654f)
-        theta_error += 6.283185307f;
+    theta_error =
+        wrap_angle_signed(theta_cmd - theta_res);
 }
 
 
