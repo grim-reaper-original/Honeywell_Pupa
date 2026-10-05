@@ -307,6 +307,15 @@ static void FOC_AngleCalibrationStep(void)
         Vd = CAL_ALIGN_VOLTAGE;
         Vq = 0.0f;
 
+
+        Inverse_Park();
+        Inverse_Clarke();
+        Zero_Sequence_Modulation();
+        Modulation_to_Duty();
+        Duty_to_CMPA();
+
+        PWM_UpdateDuty(CMPA_a, CMPA_b, CMPA_c);
+
         Cal_Count++;
 
         if (sqrtf(Id * Id + Iq * Iq) > CAL_CURRENT_LIMIT_A)
@@ -523,7 +532,7 @@ static void FOC_DisablePWM(void)
     Speed_integrator = 0.0f;
     Speed_Loop_Count = 0;
 
-    PWM_UpdateDuty(1562, 1562, 1562);
+    PWM_ForceTripZone();
 }
 
 static Uint16 FOC_CheckCurrentProtection(void)
@@ -579,6 +588,8 @@ void FOC_ResetFault(void)
     FOC_ResetStartup();
 
     Motor_Enable = 0;
+
+    PWM_ClearTripZone();
 
     theta_res_prev = theta_res;
     Measured_RPM = 0.0f;
