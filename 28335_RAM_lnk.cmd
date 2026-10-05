@@ -86,8 +86,8 @@ PAGE 0 :
    BEGIN      : origin = 0x000000, length = 0x000002     /* Boot to M0 will go here                      */
    RAMM0      : origin = 0x000050, length = 0x0003B0
    RAML0      : origin = 0x008000, length = 0x001000
-   RAML1      : origin = 0x009000, length = 0x001000
-   RAML2      : origin = 0x00A000, length = 0x001000
+   RAML1      : origin = 0x009000, length = 0x002000
+   //RAML2      : origin = 0x00A000, length = 0x001000
    RAML3      : origin = 0x00B000, length = 0x001000
    ZONE7A     : origin = 0x200000, length = 0x00FC00    /* XINTF zone 7 - program space */
    CSM_RSVD   : origin = 0x33FF80, length = 0x000076     /* Part of FLASHA.  Program with all 0x0000 when CSM is in use. */
@@ -140,7 +140,7 @@ SECTIONS
    .econst          : > RAML5,     PAGE = 1
    .esysmem         : > RAMM1,     PAGE = 1
 
-   IQmath           : > RAML1,     PAGE = 0
+   IQmath           : > RAML3,     PAGE = 0
    IQmathTables     : > IQTABLES,  PAGE = 0, TYPE = NOLOAD
 
    /* Uncomment the section below if calling the IQNexp() or IQexp()

@@ -43,16 +43,15 @@ extern volatile float theta_e;
 extern volatile float theta_res;
 extern volatile float theta_cmd;
 extern volatile float theta_error;
-extern volatile float omega_cmd;
+extern volatile float omega_e;
 
-extern volatile Uint16 FOC_Startup_State;
-extern volatile Uint32 FOC_Startup_Count;
+extern volatile Uint16 FOC_Mode;
+extern volatile Uint16 FOC_Fault;
+extern volatile Uint16 Angle_Calibration_Request;
 
-void FOC_AlignmentStep(void);
-void FOC_OpenLoopRampStep(void);
 void FOC_UpdateResolverAngle(void);
-void FOC_UpdateAngleError(void);
 void FOC_ResetStartup(void);
+void FOC_ResetFault(void);
 
 void Clarke_Transform(void);
 void Park_Transform(void);

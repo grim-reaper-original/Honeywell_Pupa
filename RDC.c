@@ -235,16 +235,29 @@ void Read_Resolver_Data(void)
 
 float RDC_GetMechanicalAngle(void)
 {
-    theta_mechh = ((float)Rotor_Angle_12 * 2.0f * PI) / 4096.0f;
-    return ((float)Rotor_Angle_12 * 2.0f * PI) / 4096.0f;
+    float theta_mech;
+
+    theta_mech =
+        ((float)Rotor_Angle_12 * 2.0f * PI) / 4096.0f;
+
+    return theta_mech;
 }
 
-    theta_elec = theta_mech * Motor_PolePairs + Angle_Offset;
 
-    while(theta_elec >= 2.0f * PI)
+float RDC_GetElectricalAngle(void)
+{
+    float theta_mech;
+    float theta_elec;
+
+    theta_mech = RDC_GetMechanicalAngle();
+
+    theta_elec =
+        theta_mech * Motor_PolePairs + Angle_Offset;
+
+    while (theta_elec >= 2.0f * PI)
         theta_elec -= 2.0f * PI;
 
-    while(theta_elec < 0.0f)
+    while (theta_elec < 0.0f)
         theta_elec += 2.0f * PI;
 
     return theta_elec;
