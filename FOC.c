@@ -43,6 +43,7 @@
 #define FOC_MODE_IDLE          0U
 #define FOC_MODE_CALIBRATION  1U
 #define FOC_MODE_CLOSED_LOOP  2U
+#define FOC_MODE_FAULT         3U
 
 
 
@@ -125,7 +126,11 @@ volatile float Cal_Average_Iq = 0.0f;
 volatile Uint16 Angle_Calibration_Request = 0;
 
 volatile Uint16 FOC_Mode = FOC_MODE_IDLE;
+volatile Uint16 FOC_Fault = 0;
 
+#define FOC_FAULT_OVERCURRENT   0x0001U
+#define FOC_FAULT_UNDERVOLTAGE  0x0002U
+#define FOC_FAULT_CALIBRATION   0x0004U
 
 
 
@@ -504,6 +509,84 @@ void FOC_ResetStartup(void)
 }
 
 
+static void FOC_DisablePWM(void)
+{
+    Vd = 0.0f;
+    Vq = 0.0f;
+
+    Id_ref = 0.0f;
+    Iq_ref = 0.0f;
+
+    Id_integrator = 0.0f;
+    Iq_integrator = 0.0f;
+
+    Speed_integrator = 0.0f;
+    Speed_Loop_Count = 0;
+
+    PWM_UpdateDuty(1562, 1562, 1562);
+}
+
+static Uint16 FOC_CheckCurrentProtection(void)
+{
+    float current_magnitude;
+
+    current_magnitude =
+        sqrtf(Id * Id + Iq * Iq);
+
+    if (current_magnitude > CURRENT_TRIP_A)
+    {
+        FOC_Fault |= FOC_FAULT_OVERCURRENT;
+        FOC_Mode = FOC_MODE_FAULT;
+
+        return 1U;
+    }
+
+    return 0U;
+}
+
+
+static Uint16 FOC_CheckDCBusProtection(void)
+{
+    if (VDC < MIN_DC_BUS_V)
+    {
+        FOC_Fault |= FOC_FAULT_UNDERVOLTAGE;
+        FOC_Mode = FOC_MODE_FAULT;
+
+        return 1U;
+    }
+
+    return 0U;
+}
+
+
+static Uint16 FOC_CheckProtection(void)
+{
+    if (FOC_CheckDCBusProtection())
+        return 1U;
+
+    if (FOC_CheckCurrentProtection())
+        return 1U;
+
+    return 0U;
+}
+
+
+void FOC_ResetFault(void)
+{
+    FOC_Fault = 0;
+    FOC_Mode = FOC_MODE_IDLE;
+
+    FOC_ResetStartup();
+
+    Motor_Enable = 0;
+
+    theta_res_prev = theta_res;
+    Measured_RPM = 0.0f;
+    Measured_Electrical_RPM = 0.0f;
+
+}
+
+
 void FOC_OpenLoopStep(void)
 {
     /*
@@ -512,24 +595,47 @@ void FOC_OpenLoopStep(void)
     FOC_UpdateResolverAngle();
 
     /*
+     * Fault state has highest priority.
+     */
+    if (FOC_Mode == FOC_MODE_FAULT)
+    {
+        FOC_DisablePWM();
+        return;
+    }
+
+    /*
+     * Enter calibration mode when requested.
+     */
+    if (Angle_Calibration_Request != 0)
+    {
+        FOC_Mode = FOC_MODE_CALIBRATION;
+    }
+
+    /*
+     * Calibration has its own voltage/PWM control.
+     */
+    if (FOC_Mode == FOC_MODE_CALIBRATION)
+    {
+        FOC_AngleCalibrationStep();
+        return;
+    }
+
+    /*
      * Keep controller inactive while motor is disabled.
      */
     if (Motor_Enable == 0)
-        {
-            Vd = 0.0f;
-            Vq = 0.0f;
+    {
+        FOC_Mode = FOC_MODE_IDLE;
 
-            Id_ref = 0.0f;
-            Iq_ref = 0.0f;
+        FOC_DisablePWM();
 
-            Id_integrator = 0.0f;
-            Iq_integrator = 0.0f;
+        return;
+    }
 
-            Speed_integrator = 0.0f;
-            Speed_Loop_Count = 0;
-
-            return;
-        }
+    /*
+     * Motor is enabled, therefore enter closed-loop mode.
+     */
+    FOC_Mode = FOC_MODE_CLOSED_LOOP;
 
     /*
      * Measure phase currents and transform them
@@ -537,6 +643,17 @@ void FOC_OpenLoopStep(void)
      */
     Clarke_Transform();
     Park_Transform();
+
+
+    /*
+     * Check current and DC-bus protection.
+     */
+    if (FOC_CheckProtection())
+    {
+        FOC_DisablePWM();
+        return;
+    }
+
 
     /*
          * Outer speed loop.
