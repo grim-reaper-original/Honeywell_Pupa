@@ -97,6 +97,9 @@ volatile float Target_RPM = TARGET_RPM;
 static float Speed_integrator = 0.0f;
 static Uint16 Speed_Loop_Count = 0;
 
+//for testing purposes only
+volatile Uint16 Test_ClearTrip = 0;
+
 
 
 // =========================================================
@@ -600,6 +603,14 @@ void FOC_ResetFault(void)
 
 void FOC_OpenLoopStep(void)
 {
+
+    //only for testing
+    if (Test_ClearTrip != 0)
+    {
+        FOC_ResetFault();
+        Test_ClearTrip = 0;
+    }
+
     /*
      * Always update resolver angle.
      */
