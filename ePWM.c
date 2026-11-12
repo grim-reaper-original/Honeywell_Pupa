@@ -168,6 +168,7 @@ void Init_ePWM_MotorControl(void)
 // Instantly pulls all 6 PWM signals to 0V using One-Shot Trip (OST)
 void PWM_ForceTripZone(void)
 {
+    PWM_UpdateDuty(1562, 1562, 1562);
     EALLOW;
     EPwm1Regs.TZFRC.bit.OST = 1;
     EPwm2Regs.TZFRC.bit.OST = 1;

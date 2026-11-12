@@ -16,10 +16,10 @@
 
 //current control constants
 #define CURRENT_LIMIT_A      5.0f
-#define CURRENT_TRIP_A       8.0f
+#define CURRENT_TRIP_A       6.0f
 
-#define CURRENT_PI_KP        1.3509f
-#define CURRENT_PI_KI        1482.83f
+#define CURRENT_PI_KP        0.675f
+#define CURRENT_PI_KI        741.0f
 
 // Speed control constants
 #define TARGET_RPM              1500.0f    //desired mechanical rotor speed.
@@ -35,15 +35,10 @@
 
 
 // Calibration Constants
-#define CAL_ALIGN_VOLTAGE       0.50f
+#define CAL_ALIGN_VOLTAGE       0.18f
 #define CAL_ALIGN_TIME_S        0.50f
 #define CAL_CAPTURE_SAMPLES     400U
 #define CAL_CURRENT_LIMIT_A     2.0f
-
-#define FOC_MODE_IDLE          0U
-#define FOC_MODE_CALIBRATION  1U
-#define FOC_MODE_CLOSED_LOOP  2U
-#define FOC_MODE_FAULT         3U
 
 
 
@@ -94,11 +89,11 @@ static float Iq_integrator = 0.0f;
 
 // Speed controller
 volatile float Target_RPM = TARGET_RPM;
+volatile float Speed_Command_RPM = 0.0f;
 static float Speed_integrator = 0.0f;
 static Uint16 Speed_Loop_Count = 0;
 
-//for testing purposes only
-volatile Uint16 Test_ClearTrip = 0;
+volatile Uint16 Angle_Calibrated = 0U;
 
 
 
@@ -186,22 +181,19 @@ void Park_Transform(void)
        + I_beta * cos_theta;
 }
 
-void Inverse_Park(void)
+void Inverse_Park_Angle(float theta)
 {
-    float sin_theta;
-    float cos_theta;
+    float sin_theta = sinf(theta);
+    float cos_theta = cosf(theta);
 
-    // Use measured rotor electrical angle
-    sin_theta = sinf(theta_res);
-    cos_theta = cosf(theta_res);
-
-    V_alpha = Vd * cos_theta
-            - Vq * sin_theta;
-
-    V_beta  = Vd * sin_theta
-            + Vq * cos_theta;
+    V_alpha = Vd * cos_theta - Vq * sin_theta;
+    V_beta  = Vd * sin_theta + Vq * cos_theta;
 }
 
+void Inverse_Park(void)
+{
+    Inverse_Park_Angle(theta_res);
+}
 
 void Inverse_Clarke(void)
 {
@@ -242,22 +234,22 @@ void Modulation_to_Duty(void)
     Duty_B = 0.5f + (Vb_mod/VDC);
     Duty_C = 0.5f + (Vc_mod/VDC);
 
-    Duty_A = clampf_local(Duty_A, 0.02f, 0.98f);
-    Duty_B = clampf_local(Duty_B, 0.02f, 0.98f);
-    Duty_C = clampf_local(Duty_C, 0.02f, 0.98f);
+    Duty_A = clampf_local(Duty_A, 0.10f, 0.90f);
+    Duty_B = clampf_local(Duty_B, 0.10f, 0.90f);
+    Duty_C = clampf_local(Duty_C, 0.10f, 0.90f);
 }
 
 void Duty_to_CMPA(void)
 {
-    CMPA_a = (Uint16)(Duty_A * 3125.0f);
-    CMPA_b = (Uint16)(Duty_B * 3125.0f);
-    CMPA_c = (Uint16)(Duty_C * 3125.0f);
-
+    // High-side on-time is 1.0f - Duty with CAU=set, CAD=clear[cite: 3]
+    CMPA_a = (Uint16)((1.0f - Duty_A) * (float)PWM_PERIOD);
+    CMPA_b = (Uint16)((1.0f - Duty_B) * (float)PWM_PERIOD);
+    CMPA_c = (Uint16)((1.0f - Duty_C) * (float)PWM_PERIOD);
 }
 
 static float AvailableVoltage(void)
 {
-    float vmax = VDC * 0.577350269f;
+    float vmax = (0.90f - 0.10f) * VDC * 0.577350269f;
 
     if (vmax < 0.0f)
         vmax = 0.0f;
@@ -298,98 +290,97 @@ static void FOC_AngleCalibrationStep(void)
 
         Vd = CAL_ALIGN_VOLTAGE;
         Vq = 0.0f;
+        Angle_Calibrated = 0U;
 
         Cal_State = 1;
         return;
     }
 
     if (Cal_State == 1)
-    {
-        theta_cmd = 0.0f;
-
-        Vd = CAL_ALIGN_VOLTAGE;
-        Vq = 0.0f;
-
-
-        Inverse_Park();
-        Inverse_Clarke();
-        Zero_Sequence_Modulation();
-        Modulation_to_Duty();
-        Duty_to_CMPA();
-
-        PWM_UpdateDuty(CMPA_a, CMPA_b, CMPA_c);
-
-        Cal_Count++;
-
-        if (sqrtf(Id * Id + Iq * Iq) > CAL_CURRENT_LIMIT_A)
         {
-            Vd = 0.0f;
+            theta_cmd = 0.0f;
+            Vd = CAL_ALIGN_VOLTAGE;
             Vq = 0.0f;
 
-            PWM_UpdateDuty(1562, 1562, 1562);
+            Inverse_Park_Angle(0.0f); // Use absolute 0 deg (F1)[cite: 3]
+            Inverse_Clarke();
+            Zero_Sequence_Modulation();
+            Modulation_to_Duty();
+            Duty_to_CMPA();
 
-            Cal_State = 0;
-            Angle_Calibration_Request = 0;
-            Motor_Enable = 0;
+            PWM_UpdateDuty(CMPA_a, CMPA_b, CMPA_c);
+            Cal_Count++;
 
-            return;
+            if (sqrtf(Id * Id + Iq * Iq) > CAL_CURRENT_LIMIT_A)
+            {
+                Vd = 0.0f;
+                Vq = 0.0f;
+
+                PWM_ForceTripZone(); // Use safe neutral+trip instead of raw 50% duty (F5)[cite: 3]
+
+                Cal_State = 0;
+                Angle_Calibration_Request = 0;
+                Motor_Enable = 0;
+
+                FOC_Fault |= FOC_FAULT_CALIBRATION; // Set fault on abort (F5)[cite: 3]
+                FOC_Mode = FOC_MODE_IDLE; // Ensure clean state machine exit (F5)[cite: 3]
+
+                return;
+            }
+
+            // Alignment duration = 0.5 seconds
+               if (Cal_Count >= (Uint32)(CAL_ALIGN_TIME_S / FOC_TS))
+               {
+                   Cal_State = 2;
+
+                   Cal_SampleCount = 0;
+
+                   Cal_SinSum = 0.0f;
+                   Cal_CosSum = 0.0f;
+                   Cal_Average_Iq = 0.0f;
+               }
+
+               return;
         }
-
-        if (Cal_Count >=
-            (Uint32)(CAL_ALIGN_TIME_S / FOC_TS))
-        {
-            Cal_Count = 0;
-            Cal_State = 2;
-        }
-
-        return;
-    }
 
     if (Cal_State == 2)
-    {
-        float mean_angle;
-        float offset;
-
-        theta_mech = RDC_GetMechanicalAngle();
-
-        theta_elec_raw =
-            wrap_angle(theta_mech * MOTOR_POLE_PAIRS);
-
-        Cal_SinSum += sinf(theta_elec_raw);
-        Cal_CosSum += cosf(theta_elec_raw);
-
-        Cal_Average_Iq += Iq;
-
-        Cal_SampleCount++;
-
-        if (Cal_SampleCount >= CAL_CAPTURE_SAMPLES)
         {
-            mean_angle =
-                atan2f(Cal_SinSum, Cal_CosSum);
+            // Use raw resolver electrical angle (no offset), scaled by ratio (1)[cite: 3]
+            float theta_elec_raw = RDC_GetRawElectricalAngle() * (MOTOR_POLE_PAIRS / RESOLVER_POLE_PAIRS);
 
-            if (mean_angle < 0.0f)
-                mean_angle += TWO_PI;
+            Cal_SinSum += sinf(theta_elec_raw);
+            Cal_CosSum += cosf(theta_elec_raw);
+            Cal_Average_Iq += Iq;
+            Cal_SampleCount++;
 
-            offset = wrap_angle(-mean_angle);
+            if (Cal_SampleCount >= CAL_CAPTURE_SAMPLES)
+            {
+                float mean_angle = atan2f(Cal_SinSum, Cal_CosSum);
+                if (mean_angle < 0.0f) mean_angle += TWO_PI;
 
-            Cal_Raw_Electrical_Angle = mean_angle;
-            Cal_Calculated_Offset = offset;
+                Cal_Raw_Electrical_Angle = mean_angle;
+                Angle_Offset = wrap_angle(-mean_angle);
 
-            Cal_Average_Iq /=
-                (float)CAL_CAPTURE_SAMPLES;
+                Cal_Average_Iq /= (float)CAL_CAPTURE_SAMPLES;
 
-            Angle_Offset = offset;
+                // Stop applied voltage
+                Vd = 0.0f;
+                Vq = 0.0f;
+                PWM_ForceTripZone(); //
 
-            Vd = 0.0f;
-            Vq = 0.0f;
+                // Mark calibration successful
+                Angle_Calibrated = 1U;
 
-            PWM_UpdateDuty(1562, 1562, 1562);
+                Cal_State = 0;
+                Angle_Calibration_Request = 0;
+                FOC_Mode = FOC_MODE_IDLE; // Ensure FOC state machine transitions cleanly
+                Motor_Enable = 0;
 
-            Cal_State = 0;
-            Angle_Calibration_Request = 0;
-            Motor_Enable = 0;
+                theta_res_prev = RDC_GetElectricalAngle();
+
+                return;
+            }
         }
-    }
 }
 
 static float CurrentPI_Update(
@@ -518,6 +509,7 @@ void FOC_ResetStartup(void)
 
     Speed_integrator = 0.0f;
     Speed_Loop_Count = 0;
+    Speed_Command_RPM = Measured_RPM;
 }
 
 
@@ -540,10 +532,7 @@ static void FOC_DisablePWM(void)
 
 static Uint16 FOC_CheckCurrentProtection(void)
 {
-    float current_magnitude;
-
-    current_magnitude =
-        sqrtf(Id * Id + Iq * Iq);
+    float current_magnitude = sqrtf(Id * Id + Iq * Iq);
 
     if (current_magnitude > CURRENT_TRIP_A)
     {
@@ -603,14 +592,6 @@ void FOC_ResetFault(void)
 
 void FOC_OpenLoopStep(void)
 {
-
-    //only for testing
-    if (Test_ClearTrip != 0)
-    {
-        FOC_ResetFault();
-        Test_ClearTrip = 0;
-    }
-
     /*
      * Always update resolver angle.
      */
@@ -628,36 +609,44 @@ void FOC_OpenLoopStep(void)
     /*
      * Enter calibration mode when requested.
      */
-    if (Angle_Calibration_Request != 0)
-    {
-        FOC_Mode = FOC_MODE_CALIBRATION;
-    }
+    if (Angle_Calibration_Request != 0 && FOC_Mode == FOC_MODE_IDLE && fabsf(Measured_RPM) < 10.0f)
+        {
+            FOC_ResetStartup();
+            PWM_ClearTripZone(); // Clear trip for calibration (F4)[cite: 3]
+            FOC_Mode = FOC_MODE_CALIBRATION;
+        }
 
-    /*
-     * Calibration has its own voltage/PWM control.
-     */
-    if (FOC_Mode == FOC_MODE_CALIBRATION)
-    {
-        FOC_AngleCalibrationStep();
-        return;
-    }
+        if (FOC_Mode == FOC_MODE_CALIBRATION)
+        {
+            FOC_AngleCalibrationStep();
+            return;
+        }
 
-    /*
-     * Keep controller inactive while motor is disabled.
-     */
-    if (Motor_Enable == 0)
-    {
-        FOC_Mode = FOC_MODE_IDLE;
+        if (Motor_Enable == 0)
+        {
+            FOC_Mode = FOC_MODE_IDLE;
+            FOC_DisablePWM();
+            return;
+        }
 
-        FOC_DisablePWM();
+        // Enter closed-loop operation
+        if (FOC_Mode == FOC_MODE_IDLE)
+        {
+            // Do not permit operation if a fault is active
+            if (FOC_Fault != 0)
+            {
+                FOC_Mode = FOC_MODE_FAULT;
+                FOC_DisablePWM();
+                return;
+            }
 
-        return;
-    }
+            FOC_ResetStartup();
 
-    /*
-     * Motor is enabled, therefore enter closed-loop mode.
-     */
-    FOC_Mode = FOC_MODE_CLOSED_LOOP;
+            // Clear PWM Trip Zone
+            PWM_ClearTripZone();
+
+            FOC_Mode = FOC_MODE_CLOSED_LOOP;
+        }
 
     /*
      * Measure phase currents and transform them
@@ -685,19 +674,39 @@ void FOC_OpenLoopStep(void)
          */
     Speed_Loop_Count++;
 
+
     if (Speed_Loop_Count >= SPEED_LOOP_DIVIDER)
+    {
+        float speed_error;
+        float speed_step;
+
+        Speed_Loop_Count = 0U;
+
+        speed_step =
+            SPEED_RAMP_RPM_PER_S *
+            (FOC_TS * SPEED_LOOP_DIVIDER);
+
+        if (Speed_Command_RPM < Target_RPM)
         {
-            float speed_error;
+            Speed_Command_RPM += speed_step;
 
-            Speed_Loop_Count = 0;
+            if (Speed_Command_RPM > Target_RPM)
+                Speed_Command_RPM = Target_RPM;
+        }
+        else if (Speed_Command_RPM > Target_RPM)
+        {
+            Speed_Command_RPM -= speed_step;
 
-            speed_error =
-                Target_RPM - Measured_RPM;
-
-            Iq_ref = SpeedPI_Update(speed_error);
+            if (Speed_Command_RPM < Target_RPM)
+                Speed_Command_RPM = Target_RPM;
         }
 
-        Id_ref = 0.0f;
+        speed_error = Speed_Command_RPM - Measured_RPM;
+
+        Iq_ref = SpeedPI_Update(speed_error);
+    }
+
+    Id_ref = 0.0f;
 
     /*
      * Current PI controllers.

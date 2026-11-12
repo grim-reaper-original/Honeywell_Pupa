@@ -1,5 +1,5 @@
 #include "RDC.h"
-
+#include "FOC.h"
 #define PI 3.14159265359f
 
 #define READ_RDC_DOS()    (GpioDataRegs.GPCDAT.bit.GPIO84)
@@ -16,7 +16,7 @@
 #define RDC_SAMPLE_HIGH() (GpioDataRegs.GPASET.bit.GPIO23 = 1)
 
 
-volatile Uint16 theta_mechh = 0;
+volatile Uint16 theta_mech = 0;
 volatile Uint16 Motor_PolePairs = 2;
 volatile float Angle_Offset = 72.158203124;
 
@@ -243,16 +243,20 @@ float RDC_GetMechanicalAngle(void)
     return theta_mech;
 }
 
+// Function added to support calibration without offsets
+float RDC_GetRawElectricalAngle(void)
+{
+    float theta = RDC_GetMechanicalAngle() * RESOLVER_POLE_PAIRS;
+    while (theta >= 2.0f * PI) theta -= 2.0f * PI;
+    while (theta < 0.0f) theta += 2.0f * PI;
+    return theta;
+}
 
 float RDC_GetElectricalAngle(void)
 {
-    float theta_mech;
     float theta_elec;
 
-    theta_mech = RDC_GetMechanicalAngle();
-
-    theta_elec =
-        theta_mech * Motor_PolePairs + Angle_Offset;
+    theta_elec = RDC_GetRawElectricalAngle() * (MOTOR_POLE_PAIRS / RESOLVER_POLE_PAIRS) + Angle_Offset*(PI / 180.0f);
 
     while (theta_elec >= 2.0f * PI)
         theta_elec -= 2.0f * PI;

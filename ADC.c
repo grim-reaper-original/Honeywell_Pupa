@@ -50,19 +50,24 @@ void Calibrate_ADC_Offsets(void)
     // Trigger the ADC 1000 times to get a solid average while the inverter is OFF
     for(i = 0; i < 1000; i++)
     {
-        // Force a software trigger to the ADC
+        // Reset ADC sequencer before starting next conversion
+        AdcRegs.ADCTRL2.bit.RST_SEQ1 = 1;
+
+        // Trigger ADC
         AdcRegs.ADCTRL2.bit.SOC_SEQ1 = 1;
 
-        // Wait for conversion to complete
+        // Wait for conversion
         while(AdcRegs.ADCST.bit.INT_SEQ1 == 0) {}
-        AdcRegs.ADCST.bit.INT_SEQ1_CLR = 1; // Clear flag
 
+        // Read results
         Sum_A += (AdcRegs.ADCRESULT0 >> 4);
         Sum_B += (AdcRegs.ADCRESULT1 >> 4);
 
+        // Clear interrupt flag
+        AdcRegs.ADCST.bit.INT_SEQ1_CLR = 1;
+
         DELAY_US(100);
     }
-
     Offset_Current_A = (float)Sum_A / 1000.0f;
     Offset_Current_B = (float)Sum_B / 1000.0f;
 
@@ -94,9 +99,16 @@ __interrupt void adc_isr(void)
     Read_Resolver_Data();
 
     FOC_OpenLoopStep();
+
     GpioDataRegs.GPACLEAR.bit.GPIO10 = 1;
 
+    // Reset ADC sequencer for the next conversion
+    AdcRegs.ADCTRL2.bit.RST_SEQ1 = 1;
+
+    // Clear ADC interrupt flag
     AdcRegs.ADCST.bit.INT_SEQ1_CLR = 1;
+
+    // Acknowledge PIE group
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
 }
 

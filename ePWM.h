@@ -4,6 +4,9 @@
 #include "DSP2833x_Device.h"
 #include "DSP2833x_Examples.h"
 
+#define PWM_PERIOD          3125U
+#define PWM_HALF            1562U
+
 // =========================================================
 // Public PWM Functions
 // =========================================================

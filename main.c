@@ -69,14 +69,7 @@ void main(void)
 
     // Background safety loop
     while(1)
-    {
-        if(Motor_Enable == 0)
         {
-            PWM_ForceTripZone();
+
         }
-        else
-        {
-            PWM_ClearTripZone();
-        }
-    }
 }
