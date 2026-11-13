@@ -30,16 +30,13 @@ PLLSTS.DIVSEL = 2
 SYSCLKOUT = 25 MHz × 10 / 2
           = 125 MHz
 ```
-
-The older 150 MHz assumptions in legacy code are **not the current basis** for the FOC PWM configuration.
-
 ---
 
 # 2. Current Development Stage
 
 The current development stage is:
 
-> **Open-loop voltage-vector generation + peripheral bring-up + hardware timing validation, before PI current control.**
+> **Open-loop voltage-vector generation + peripheral bring-up + hardware timing validation, before PI current control. Closed loop control is in development**
 
 ### Implemented
 
@@ -178,8 +175,6 @@ ePWM1 is the master time base; ePWM2 and ePWM3 are synchronized slaves.
 ```text
 CMPA = 1562/1563
 ```
-
-Do not use the old `1875` initial value for the current 3125-TBPRD configuration, because that corresponds to 60%.
 
 ### Deadband
 
@@ -902,9 +897,6 @@ Before applying the 28 V inverter bus:
 8. Verify gate-driver enable/fault behavior.
 
 Initial motor testing should use a current-limited supply and conservative voltage commands.
-
-Do not rely on `Motor_Enable = 1` as the only safety mechanism. Resolver faults and Trip Zone behavior must be verified first.
-
 ---
 
 # 20. Current Milestone Plan
@@ -935,7 +927,6 @@ Do not rely on `Motor_Enable = 1` as the only safety mechanism. Resolver faults 
 
 - The current hardware oscillator is **25 MHz**; the intended F28335 system clock is **125 MHz** using `PLLCR = 10` and `DIVSEL = 2`.
 - The current PWM target is **20 kHz**, using `TBPRD = 3125` in up-down mode.
-- Do not retain legacy `3750`/150 MHz PWM calculations in the active FOC path.
 - `CMPA = 1562/1563` corresponds to approximately 50% duty with `TBPRD = 3125`.
 - `DBRED/DBFED = 150` corresponds to approximately **1.2 µs** deadtime at 125 MHz.
 - `CURRENT_GAIN` is treated as validated for the current development stage.
@@ -987,7 +978,7 @@ The immediate objective is **not PI tuning**. The immediate objective is to prov
 
 ---
 
-**Last updated: 21 September 2026**
+**Last updated: 13 November 2026**
 =======
-**Last updated:** 11 September 2026
+**Last major update:** 11 September 2026
 >>>>>>> branch 'master' of https://github.com/grim-reaper-original/Honeywell_Pupa
